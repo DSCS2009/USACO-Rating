@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% set title = '联考评分 - Profile' %}
+{% set active_page = 'profile' %}
+
+{% block extra_head %}
+<link href="https://cdn.datatables.net/2.0.2/css/dataTables.semanticui.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<h2 class="ui header">{{ profile_user.username }} 的个人资料</h2>
+<div class="ui stackable two column grid">
+    <div class="column">
+        <div class="ui segment">
+            <h3 class="ui header">基础信息</h3>
+            <p><strong>用户 ID：</strong> {{ profile_user.id }}</p>
+            <p><strong>洛谷 UID：</strong> {{ profile_user.luoguid or '未填写' }}</p>
+            <p><strong>注册时间：</strong> <span class="time-display" data-timestamp="{{ profile_user.created_at|int }}"></span></p>
+            <p><strong>个人简介：</strong> {{ profile_user.info or '暂无' }}</p>
+        </div>
+    </div>
+    <div class="column">
+        <div class="ui segment">
+            <h3 class="ui header">统计</h3>
+            <p><strong>总评分数：</strong> {{ stats.total_votes }}</p>
+            <p><strong>平均难度 Δ：</strong> {{ '%+.2f'|format(stats.avg_difficulty_delta) if stats.avg_difficulty_delta is not none else 'N/A' }}</p>
+            <p><strong>平均质量 Δ：</strong> {{ '%+.2f'|format(stats.avg_quality_delta) if stats.avg_quality_delta is not none else 'N/A' }}</p>
+            <p><strong>最近评分时间：</strong> {% if stats.last_vote %}<span class="time-display" data-timestamp="{{ stats.last_vote }}" data-format="relative"></span>{% else %}暂无{% endif %}</p>
+        </div>
+    </div>
+</div>
+<h3 class="ui dividing header">近期评分记录</h3>
+<table class="ui celled table" id="votesTable">
+    <thead>
+        <tr>
+            <th>时间</th>
+            <th>题目</th>
+            <th>难度</th>
+            <th>质量</th>
+            <th>评论</th>
+            <th>公开</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for vote in votes %}
+        <tr>
+            <td><span class="time-display" data-timestamp="{{ vote.created_at }}"></span></td>
+            <td><a href="{{ url_for('problem_detail', problem_id=vote.problem.id) }}">{{ vote.problem.title }}</a></td>
+            <td>{{ vote.difficulty }}</td>
+            <td>{{ '%.2f'|format(vote.quality) }}</td>
+            <td>{{ vote.comment or '' }}</td>
+            <td>{{ '是' if vote.public else '否' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if not votes %}
+<div class="ui message">暂时没有评分记录。</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    new DataTable('#votesTable', {
+        pageLength: 10,
+        lengthChange: false,
+        ordering: false,
+        searching: false
+    });
+</script>
+{% endblock %}
