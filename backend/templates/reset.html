@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% set title = '联考评分 - 重置密码' %}
+{% set active_page = 'reset' %}
+
+{% block content %}
+<code id="code" style="display: none">
+(async function () {
+    try {
+        await fetch('https://www.luogu.com.cn/paste/new', {
+            'headers': {
+                'content-type': 'application/json;charset=UTF-8',
+                'x-csrf-token': document.getElementsByName('csrf-token')[0].content,
+                'x-requested-with': 'XMLHttpRequest'
+            },
+            'referrer': `https://www.luogu.com.cn/user/${_feInstance.currentUser.uid}`,
+            'referrerPolicy': 'strict-origin-when-cross-origin',
+            'body': `{"data":"联考评分用户验证: ${_feInstance.currentUser.uid}","public":true}`,
+            'method': 'POST',
+            'mode': 'cors',
+            'credentials': 'include'
+        }).then(res => res.json()).then(res => {
+            let input = confirm(`您的验证剪贴板编号为：${res.id}，点击确定以复制。`);
+            if (input) {
+                var node = document.createElement('input');
+                node.value = res.id;
+                document.body.appendChild(node);
+                node.select();
+                document.execCommand('Copy');
+                node.style.display = 'none';
+            }
+        });
+    } catch (e) {
+        console.error(e);
+        alert('好像哪里有点问题\n' + e.toString());
+    }
+})();
+</code>
+<h2>重置密码</h2>
+<div class="ui segment">
+    <p>请在下方输入您的用户 ID，剪贴板 ID 以及新密码，然后点击重置。</p>
+    <p>请您点击 <a id="copycode">复制代码</a>，并在洛谷执行以获取验证所用的剪贴板 ID。</p>
+</div>
+<div class="ui segment">
+    <form class="ui form" action="{{ url_for('reset_password') }}" method="post">
+        <div class="field">
+            <label>用户 ID：</label>
+            <input type="text" id="luoguid" name="luoguid" value="{{ request.form.get('luoguid','') }}">
+        </div>
+        <div class="field">
+            <label>剪贴板 ID：</label>
+            <input type="text" id="pasteid" name="pasteid" value="{{ request.form.get('pasteid','') }}">
+        </div>
+        <div class="field">
+            <label>新密码：</label>
+            <input type="password" id="password" name="password">
+        </div>
+        <div class="field">
+            <label>确认密码：</label>
+            <input type="password" id="password2" name="password2">
+        </div>
+        <input id="csrf_token" name="csrf_token" type="hidden" value="{{ csrf_token() }}">
+        <button class="ui primary button" id="reset" type="submit">重置</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    $('#copycode').click(function () {
+        var node = document.createElement('textarea');
+        node.value = $('#code').text();
+        document.body.appendChild(node);
+        node.select();
+        document.execCommand('Copy');
+        node.style.display = 'none';
+        alert('已复制到剪贴板');
+    });
+</script>
+{% endblock %}

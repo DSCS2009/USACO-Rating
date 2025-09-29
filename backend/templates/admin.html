@@ -1,0 +1,418 @@
+{% extends 'base.html' %}
+{% set title = '联考评分 - Admin' %}
+{% set active_page = 'admin' %}
+
+{% block extra_head %}
+<link href="https://cdn.datatables.net/2.0.2/css/dataTables.semanticui.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<h2 class="ui header">管理面板</h2>
+<div class="ui three column stackable grid">
+    <div class="column">
+        <div class="ui statistic">
+            <div class="value">{{ stats.total_users }}</div>
+            <div class="label">用户总数</div>
+        </div>
+    </div>
+    <div class="column">
+        <div class="ui statistic">
+            <div class="value">{{ stats.total_problems }}</div>
+            <div class="label">题目数量</div>
+        </div>
+    </div>
+    <div class="column">
+        <div class="ui statistic">
+            <div class="value">{{ stats.total_votes }}</div>
+            <div class="label">评分总数</div>
+        </div>
+    </div>
+</div>
+{% if pending_users %}
+<h3 class="ui dividing header" style="margin-top: 2em;">待审核注册</h3>
+<table class="ui celled table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>用户名</th>
+            <th>洛谷 UID</th>
+            <th>备注</th>
+            <th>注册时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in pending_users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.luoguid or '-' }}</td>
+            <td>{{ user.info or '' }}</td>
+            <td><span class="time-display" data-timestamp="{{ user.created_at }}"></span></td>
+            <td>
+                <form method="post" action="{{ url_for('admin_approve_user', user_id=user.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="ui small positive button" type="submit">通过</button>
+                </form>
+                <form method="post" action="{{ url_for('admin_reject_user', user_id=user.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="ui small negative button" type="submit">拒绝</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<h3 class="ui dividing header" style="margin-top: 2em;">账户管理</h3>
+<table class="ui celled table" id="userTable">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>用户名</th>
+            <th>角色</th>
+            <th>状态</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in active_users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ ', '.join(user.roles) if user.roles else '普通用户' }}</td>
+            <td>
+                {% if user.banned %}
+                    <span class="ui red label">封禁</span>
+                {% else %}
+                    <span class="ui green label">正常</span>
+                {% endif %}
+                {% if not user.approved %}
+                    <span class="ui orange label">待审核</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="ui horizontal list">
+                    <div class="item">
+                        <form method="post" action="{{ url_for('admin_set_role', user_id=user.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% if user.is_admin %}
+                                <input type="hidden" name="is_admin" value="0">
+                                <button class="ui mini button" type="submit" {% if g.user and g.user.id == user.id %}disabled{% endif %}>取消管理员</button>
+                            {% else %}
+                                <input type="hidden" name="is_admin" value="1">
+                                <button class="ui mini primary button" type="submit">设为管理员</button>
+                            {% endif %}
+                        </form>
+                    </div>
+                    <div class="item">
+                        {% if user.banned %}
+                        <form method="post" action="{{ url_for('admin_unban_user', user_id=user.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="ui mini positive button" type="submit">解封</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ url_for('admin_ban_user', user_id=user.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="ui mini negative button" type="submit" {% if g.user and g.user.id == user.id %}disabled{% endif %}>封禁</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="item">
+                        <form method="post" action="{{ url_for('admin_clear_votes', user_id=user.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="ui mini orange button" type="submit">清除评分</button>
+                        </form>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="ui stackable grid" style="margin-top: 2em;">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">发布公告</h3>
+            <form class="ui form" method="post" action="{{ url_for('create_announcement') }}">
+                <div class="field">
+                    <label>标题</label>
+                    <input type="text" name="title" required>
+                </div>
+                <div class="field">
+                    <label>内容 (支持 HTML)</label>
+                    <textarea name="content" rows="4" required></textarea>
+                </div>
+                <div class="field">
+                    <div class="ui checkbox">
+                        <input type="checkbox" name="pinned" value="1">
+                        <label>置顶</label>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">发布</button>
+            </form>
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">添加题目</h3>
+            <form class="ui form" method="post" action="{{ url_for('create_problem') }}">
+                <div class="field">
+                    <label>课程类型</label>
+                    <select name="type_id" id="courseSelect" required>
+                        {% for type in types %}
+                        <option value="{{ type.id }}">{{ type.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label>比赛</label>
+                    <input type="text" name="contest" id="contestInput" list="contestOptions" required>
+                    <datalist id="contestOptions"></datalist>
+                    <small>从列表中选择现有比赛或输入新名称。</small>
+                </div>
+                <div class="field">
+                    <label>题目名称</label>
+                    <input type="text" name="title" required>
+                </div>
+                <div class="field">
+                    <label>链接</label>
+                    <input type="url" name="url">
+                </div>
+                <div class="field">
+                    <label>描述</label>
+                    <textarea name="description" rows="3"></textarea>
+                </div>
+                <div class="two fields">
+                    <div class="field">
+                        <label>出题人 (JSON 数组)</label>
+                        <input type="text" name="setter_json" placeholder='[{"name": "Alice"}]'>
+                    </div>
+                    <div class="field">
+                        <label>来源 (JSON 数组)</label>
+                        <input type="text" name="source_json" placeholder='[{"name": "NOI"}]'>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Meta (JSON)</label>
+                    <textarea name="meta_json" rows="3" placeholder='{"stats": {"ac_count": 0, "submit_count": 0}}'></textarea>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">添加</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="ui stackable grid" style="margin-top: 2em;">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">课程管理</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_course') }}">
+                <div class="fields">
+                    <div class="twelve wide field">
+                        <label>课程名称</label>
+                        <input type="text" name="name" placeholder="例如：自定义训练营" required>
+                    </div>
+                    <div class="four wide field" style="display:flex;align-items:flex-end;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui primary button" type="submit">新建课程</button>
+                    </div>
+                </div>
+            </form>
+            <div class="ui divider"></div>
+            <h4 class="ui header">自定义课程</h4>
+            {% if custom_courses %}
+            <div class="ui relaxed divided list">
+                {% for course in custom_courses %}
+                <div class="item" style="display:flex; justify-content: space-between; align-items: center;">
+                    <div class="content">
+                        <div class="header">{{ course.name }}</div>
+                        <div class="description">课程 ID：{{ course.id }}</div>
+                    </div>
+                    <form method="post" action="{{ url_for('admin_delete_course') }}" style="margin:0;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="type_id" value="{{ course.id }}">
+                        <button class="ui mini negative button" type="submit">删除课程</button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="ui message">暂无自定义课程。</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">比赛管理</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_contest') }}">
+                <div class="two fields">
+                    <div class="field">
+                        <label>课程</label>
+                        <select name="type_id" id="contestCourseSelect" required>
+                            {% for type in types %}
+                            <option value="{{ type.id }}">{{ type.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>比赛名称</label>
+                        <input type="text" name="name" placeholder="例如：第一周模拟赛" required>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">新建比赛</button>
+            </form>
+            <div class="ui divider"></div>
+            <form class="ui form" method="post" action="{{ url_for('admin_delete_contest') }}">
+                <div class="two fields">
+                    <div class="field">
+                        <label>课程</label>
+                        <select name="type_id" id="deleteContestCourseSelect" required>
+                            {% for type in types %}
+                            <option value="{{ type.id }}">{{ type.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>比赛</label>
+                        <select name="contest_id" id="contestOptionsForDelete" required>
+                            <option value="">请选择课程</option>
+                        </select>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui red button" type="submit">删除比赛</button>
+            </form>
+        </div>
+    </div>
+</div>
+<div class="ui segment" style="margin-top: 2em;">
+    <h3 class="ui header">重置用户密码</h3>
+    <form class="ui form" method="post" action="{{ url_for('admin_reset_user_password') }}">
+        <div class="three fields">
+            <div class="field">
+                <label>用户</label>
+                <select name="user_id" required>
+                    {% for user in active_users %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label>新密码</label>
+                <input type="password" name="password" required>
+            </div>
+            <div class="field">
+                <label>确认新密码</label>
+                <input type="password" name="password_confirm" required>
+            </div>
+        </div>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ui primary button" type="submit">更新密码</button>
+    </form>
+</div>
+<h3 class="ui dividing header">公告列表</h3>
+<table class="ui celled table" id="announcementTable">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>标题</th>
+            <th>时间</th>
+            <th>置顶</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for announcement in announcements %}
+        <tr>
+            <td>{{ announcement.id }}</td>
+            <td>{{ announcement.title }}</td>
+            <td><span class="time-display" data-timestamp="{{ announcement.created_at }}"></span></td>
+            <td>{{ '是' if announcement.pinned else '否' }}</td>
+            <td>
+                <form method="post" action="{{ url_for('delete_announcement', announcement_id=announcement.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="ui red mini button" type="submit">删除</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    new DataTable('#announcementTable', {
+        pageLength: 10,
+        lengthChange: false,
+        ordering: false,
+        searching: false
+    });
+    new DataTable('#userTable', {
+        pageLength: 10,
+        lengthChange: false,
+        ordering: false,
+        searching: true
+    });
+    $('.ui.checkbox').checkbox();
+
+    const courseContestMap = {{ course_contests|tojson }};
+
+    const courseSelect = document.getElementById('courseSelect');
+    const contestDatalist = document.getElementById('contestOptions');
+    function getContestsForCourse(courseId) {
+        return courseContestMap[String(courseId)] || [];
+    }
+    function refreshContestDatalist(courseId) {
+        if (!contestDatalist) return;
+        contestDatalist.innerHTML = '';
+        getContestsForCourse(courseId).forEach(contest => {
+            const option = document.createElement('option');
+            option.value = contest.name;
+            contestDatalist.appendChild(option);
+        });
+    }
+    if (courseSelect) {
+        refreshContestDatalist(courseSelect.value);
+        courseSelect.addEventListener('change', (event) => {
+            refreshContestDatalist(event.target.value);
+        });
+    }
+
+    const deleteCourseSelect = document.getElementById('deleteContestCourseSelect');
+    const contestDeleteSelect = document.getElementById('contestOptionsForDelete');
+    function refreshContestDeleteOptions(courseId) {
+        if (!contestDeleteSelect) return;
+        const contests = getContestsForCourse(courseId);
+        contestDeleteSelect.innerHTML = '';
+        if (!contests.length) {
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '该课程暂无比赛';
+            contestDeleteSelect.appendChild(placeholder);
+            contestDeleteSelect.disabled = true;
+            return;
+        }
+        contestDeleteSelect.disabled = false;
+        contests.forEach(contest => {
+            const option = document.createElement('option');
+            option.value = contest.id;
+            option.textContent = contest.name;
+            contestDeleteSelect.appendChild(option);
+        });
+    }
+    if (deleteCourseSelect) {
+        refreshContestDeleteOptions(deleteCourseSelect.value);
+        deleteCourseSelect.addEventListener('change', (event) => {
+            refreshContestDeleteOptions(event.target.value);
+        });
+    }
+</script>
+{% endblock %}

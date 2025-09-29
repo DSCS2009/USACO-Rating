@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% set title = '联考评分 - Login' %}
+{% set active_page = 'login' %}
+
+{% block content %}
+<div class="ui centered grid" style="margin-top: 2em;">
+    <div class="six wide column">
+        <div class="ui segment">
+            <h2 class="ui header">登录</h2>
+            <form class="ui form" action="{{ url_for('login') }}" method="post">
+                <div class="field">
+                    <label for="username">用户名</label>
+                    <input required type="text" class="form-control" name="username" value="{{ request.form.get('username','') }}">
+                </div>
+                <div class="field">
+                    <label for="password">密码</label>
+                    <input required type="password" class="form-control" name="password">
+                </div>
+                <input id="csrf_token" name="csrf_token" type="hidden" value="{{ csrf_token() }}">
+                <button type="submit" class="ui primary button" style="width: 100%;">登录</button>
+            </form>
+            <div style="margin-top: 1em; text-align: center;">
+                <a href="{{ url_for('reset_password') }}">重置密码</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

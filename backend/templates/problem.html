@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% set title = '题目详情' %}
+{% set active_page = 'problems' %}
+
+{% block content %}
+<div class="ui segment">
+    <h2 class="ui header">{{ problem.title }}</h2>
+    <p><strong>比赛：</strong> {{ problem.contest }}</p>
+    <p><strong>描述：</strong> {{ problem.description }}</p>
+    <p><strong>链接：</strong> {% if problem.url %}<a href="{{ problem.url }}" target="_blank">题目链接</a>{% else %}暂无{% endif %}</p>
+    <p><strong>出题人：</strong> {% if problem.setter %}{{ problem.setter|map(attribute='name')|join('，') }}{% else %}未提供{% endif %}</p>
+    <p><strong>来源：</strong> {% if problem.source %}{{ problem.source|map(attribute='name')|join('，') }}{% else %}未提供{% endif %}</p>
+    {% if problem.meta.stats %}
+    <p><strong>通过率：</strong> {{ problem.meta.stats.ac_count }}/{{ problem.meta.stats.submit_count }} ({{ problem.meta.stats.pass_rate }}%)</p>
+    <p><strong>平均分：</strong> {{ '%.2f'|format(problem.meta.stats.avg_score) }}</p>
+    {% endif %}
+</div>
+<div class="ui stackable two column grid">
+    <div class="column">
+        <div class="ui segment">
+            <h3 class="ui header">难度统计</h3>
+            <p>平均值：{{ '%.0f'|format(problem.avg_difficulty) if problem.avg_difficulty is not none else 'N/A' }}</p>
+            <p>中位数：{{ '%.0f'|format(problem.medium_difficulty) if problem.medium_difficulty is not none else 'N/A' }}</p>
+            <p>标准差：{{ '%.2f'|format(problem.sd_difficulty) if problem.sd_difficulty is not none else 'N/A' }}</p>
+            <p>评分数：{{ problem.cnt1 }}</p>
+        </div>
+    </div>
+    <div class="column">
+        <div class="ui segment">
+            <h3 class="ui header">质量统计</h3>
+            <p>平均值：{{ '%.2f'|format(problem.avg_quality) if problem.avg_quality is not none else 'N/A' }}</p>
+            <p>中位数：{{ '%.2f'|format(problem.medium_quality) if problem.medium_quality is not none else 'N/A' }}</p>
+            <p>标准差：{{ '%.2f'|format(problem.sd_quality) if problem.sd_quality is not none else 'N/A' }}</p>
+            <p>评分数：{{ problem.cnt2 }}</p>
+        </div>
+    </div>
+</div>
+<h3 class="ui dividing header">评分列表</h3>
+{% if is_admin %}
+<form class="ui form" method="post" action="{{ url_for('admin_delete_problem_votes', problem_id=problem.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% endif %}
+<table class="ui celled table" id="problemVotes">
+    <thead>
+        <tr>
+            {% if is_admin %}<th>选择</th>{% endif %}
+            <th>用户</th>
+            <th>难度</th>
+            <th>质量</th>
+            <th>评论</th>
+            <th>公开</th>
+            <th>时间</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for vote in votes %}
+        <tr>
+            {% if is_admin %}
+            <td class="collapsing">
+                <div class="ui checkbox">
+                    <input type="checkbox" name="vote_ids" value="{{ vote.id }}">
+                    <label></label>
+                </div>
+            </td>
+            {% endif %}
+            <td><a href="{{ url_for('profile', user_id=vote.user.id) }}">{{ vote.user.username }}</a></td>
+            <td>{{ vote.difficulty }}</td>
+            <td>{{ '%.2f'|format(vote.quality) }}</td>
+            <td>{{ vote.comment or '' }}</td>
+            <td>{{ '是' if vote.public else '否' }}</td>
+            <td><span class="time-display" data-timestamp="{{ vote.created_at }}"></span></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% if is_admin %}
+<div class="ui clearing segment" style="margin-top: 1em;">
+    <button class="ui red button" type="submit" onclick="return confirm('确认删除所选评分？');">删除选中评分</button>
+</div>
+</form>
+{% endif %}
+{% if not votes %}
+<div class="ui message">目前还没有评分。</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    new DataTable('#problemVotes', {
+        pageLength: 10,
+        lengthChange: false,
+        ordering: false,
+        searching: false
+    });
+    $('.ui.checkbox').checkbox();
+</script>
+{% endblock %}

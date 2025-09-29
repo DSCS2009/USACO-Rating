@@ -1,0 +1,37 @@
+.main-container {
+	margin-top: 3rem;
+	margin-left: 6%;
+	margin-right: 6%;
+	margin-bottom: 80px;
+	width: 88%;
+}
+
+span.difficulty-circle {
+	display: inline-block;
+	border-radius: 50%;
+	border-style: solid;
+	border-width: 1px;
+	margin-right: 5px;
+	height: 12px;
+	width: 12px;
+}
+
+.vote-input {
+	border: none;
+	outline: none;
+	font-size: 18px;
+	width: 100%;
+}
+
+.grayContainer {
+    margin-bottom: 60px;
+    width: 80%;
+    margin-left: 10%;
+    background-color: #FAFAFA;
+    box-shadow: 0 4px 6px rgb(8 8 8 / 10%), 0 0 0 1px rgb(8 8 8 / 10%);
+    padding: 40px 50px 40px 50px;
+    word-break: break-word;
+    word-wrap: break-word;
+    font-size: 18px;
+    color: #404040;
+}

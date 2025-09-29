@@ -1,0 +1,26 @@
+{
+  "types": [
+    {"id": 1, "name": "【联赛】2023 CSP/NOIP 未来共同体 集训营"},
+    {"id": 2, "name": "正式（CCF）赛题"},
+    {"id": 3, "name": "非联考模拟赛"},
+    {"id": 4, "name": "【省选】NOI2024 省选 OIFC未来共同体 集训营"},
+    {"id": 5, "name": "正式（非 CCF）赛题"},
+    {"id": 6, "name": "NOI 2024 训练"},
+    {"id": 7, "name": "【国赛】NOI2024 OIFC未来共同体 集训营-2024.6"},
+    {"id": 8, "name": "【联赛】2024NOIP/CSP OIFC未来共同体 集训营"},
+    {"id": 9, "name": "2024OIFC集训"},
+    {"id": 10, "name": "【WC】NOI2025 WC OIFC未来共同体 集训营"},
+    {"id": 11, "name": "【省选】NOI2025 省选 OIFC未来共同体 集训营"},
+    {"id": 12, "name": "NOI 2025"}
+  ],
+  "groups": [
+    {"label": "2023", "type_ids": [1]},
+    {"label": "2024", "type_ids": [4, 6, 7, 8, 9]},
+    {"label": "2025", "type_ids": [10, 11, 12]},
+    {"label": "Misc", "type_ids": [2, 3, 5]},
+    {"label": "NOI", "type_ids": [6, 7, 9, 12]},
+    {"label": "NOIP", "type_ids": [8]},
+    {"label": "WC", "type_ids": [10]},
+    {"label": "省选", "type_ids": [4, 11]}
+  ]
+}

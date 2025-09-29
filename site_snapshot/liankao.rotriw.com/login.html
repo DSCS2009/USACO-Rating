@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>联考评分 Login</title>
+
+    <meta charset="UTF-8">
+    <meta name="renderer" content="webkit">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap/4.6.0/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" href="https://liankao.rotriw.com/favicon.png">
+    <link rel="stylesheet" href="static/css/main.css">
+    <link rel="stylesheet" href="static/css/utility.css">
+    <script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/popper.js/1.11.0/umd/popper.min.js"></script>
+    <script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap/4.6.0/js/bootstrap.min.js"></script>
+    <script src="static/js/localIO.js"></script>
+    <script src="static/js/cookieIO.js"></script>
+</head>
+
+<body>
+<nav class="navbar sticky-top navbar-expand-lg navbar-dark bg-dark">
+    <a class="mb-0 h1 navbar-brand active" href="index.html">联考题目评分</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+        <ul class="navbar-nav mr-auto">
+            <li class="nav-item">
+				<a class="nav-link" href="index.html">Problems</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="register.html">Register</a>
+			</li>
+        </ul>
+    </div>
+</nav>
+
+<div class="main-container" style="margin-left: 10%;width: 80%;margin-right: 10%;">
+    <!--- login form --->
+    
+    <div class="grayContainer" style="font-size: 21px;">
+        <form action="login.html" method="post">
+            <label for="username"><b>用户名</b></label><input required type="text" class="form-control" name="username"
+                                                              placeholder="">
+            <br>
+            <label for="password"><b>密码</b></label><input required type="password" class="form-control"
+                                                            name="password"
+                                                            placeholder="">
+            <br>
+            <button type="submit" class="btn btn-primary">登录</button>
+            <input id="csrf_token" name="csrf_token" type="hidden" value="IjI4YjNjYTZjYzVjODNhZjNiOWE0YzhmMWI1ZmQ5MGVlYzgyZjVmNWYi.aNpRmg.rvokjvotwC-76tkVicVx523rS0c">
+        </form>
+        <a href="reset.html">重置密码</a>
+    </div>
+</div>
+</body>
+</html>

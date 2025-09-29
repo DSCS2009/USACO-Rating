@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% set title = '联考评分' %}
+{% set active_page = 'problems' %}
+
+{% block extra_head %}
+<link href="https://cdn.datatables.net/2.0.2/css/dataTables.dataTables.min.css" rel="stylesheet">
+<link href="https://cdn.staticfile.org/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css" rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ui toggle checkbox" style="display: inline-flex">
+    <input type="checkbox" id="practice">
+    <label for="practice">Practice Mode</label>
+</div>
+<span class="ui basic circular icon label">
+    <i class="question circle icon"></i>
+</span>
+<div class="ui toggle checkbox" style="display: inline-flex;margin-right: 20px;">
+    <input type="checkbox" id="median">
+    <label for="median">Use Median</label>
+</div>
+<div class="ui toggle checkbox" style="display: inline-flex;margin-right: 20px;">
+    <input type="checkbox" id="hideUnrated">
+    <label for="hideUnrated">Hide Unrated Ratings</label>
+</div>
+<div class="ui dropdown right labeled icon button" style="display: inline-flex;">
+    <div class="text">Sort By</div>
+    <i class="dropdown icon"></i>
+    <div class="menu">
+        <a class="item" href="javascript:sortProblems(0)">Contest</a>
+        <a class="item" href="javascript:sortProblems(1)">Rating</a>
+        <a class="item" href="javascript:sortProblems(2)">Quality</a>
+    </div>
+</div>
+<div class="ui dropdown right labeled icon button" style="display: inline-flex;">
+    <span class="text">选择课程</span>
+    <i class="dropdown icon"></i>
+    <div class="menu" id="dropdown-choosecourse">
+        {% for group in course_groups %}
+        <div class="item">
+            <i class="dropdown icon"></i>
+            {{ group.label }}
+            <div class="menu">
+                {% for entry in group.entries %}
+                <a class="item" href="javascript:init({{ entry.id }});">{{ entry.name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<table class="ui celled table" style="width:100%; margin-top: 1em;" id="maint">
+    <thead>
+        <tr>
+            <th>Contest</th>
+            <th id="typename">Problems</th>
+            <th id="difficulty">Difficulty</th>
+            <th id="quality">Quality</th>
+            <th></th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody class="problems"></tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script src="{{ url_for('static', filename='js/circle.js') }}"></script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+{% endblock %}

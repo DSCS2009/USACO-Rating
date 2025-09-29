@@ -1,0 +1,243 @@
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>联考评分</title>
+    
+<meta charset="UTF-8">
+<meta name="renderer" content="webkit">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="stylesheet" type="text/css"
+    href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/fomantic-ui/2.9.0/semantic.min.css">
+<link rel="icon" href="static/favicon.ico">
+<link rel="stylesheet" href="static/css/main.css">
+<link rel="stylesheet" href="static/css/utility.css">
+<script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/fomantic-ui/2.9.0/semantic.min.js"></script>
+<script src="static/js/localIO.js"></script>
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css"
+    rel="stylesheet">
+<script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/js/star-rating.min.js"></script>
+<link rel="stylesheet" href="https://cdn.staticfile.org/font-awesome/4.7.0/css/font-awesome.css">
+<script
+    src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.js"></script>
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css"
+    rel="stylesheet">
+<script src="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/moment.js/2.30.1/moment.min.js"></script>
+<script src="static/js/time_utils.js"></script>
+
+
+    <link href="https://cdn.datatables.net/2.0.2/css/dataTables.dataTables.min.css" rel="stylesheet">
+    <script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+    <!-- <script src="https://cdn.datatables.net/2.0.2/js/dataTables.semanticui.js"></script> -->
+</head>
+
+<body>
+    
+<div class="ui borderless menu" style="height: 50px;">
+    <div class="ui container">
+        <a class="header item" href="index.html">
+            联考题目评分
+        </a>
+        <a class="item" href="index.html">Problems</a>
+        <a class="item" href="register.html">Register</a>
+        <a class="item" href="legal.html">Legal</a>
+        
+        <div class="ui simple dropdown item">
+            Links
+            <i class="dropdown icon"></i>
+            <div class="menu">
+                <a class="item" href="https://poem.rotriw.com/">（Ad）古诗（）谜</a>
+                <a class="item" href="https://www.xinyoudui.com">信友队</a>
+            </div>
+        </div>
+        <div class="right menu">
+            
+            <a class="item" href="login.html">Login</a>
+            
+        </div>
+    </div>
+</div>
+
+    
+    <div class="ui container main-container">
+        <div class="ui toggle checkbox" style="display: inline-flex">
+            <input type="checkbox" id="practice">
+            <label for="practice">Practice Mode</label>
+        </div>
+        <!-- <span id="HelpBadgeTooltip-difficulty" class="ui blue basic label"
+            style="display: inline-flex;margin-right: 15px;" data-content="Progress are stored locally via local storage. Click on cells with problem names to update their status."
+            data-variation="wide" data-position="bottom left">?</span> -->
+        <span class="ui basic circular icon label">
+            <i class="question circle icon"></i>
+        </span>
+        <div class="ui toggle checkbox" style="display: inline-flex;margin-right: 20px;">
+            <input type="checkbox" id="median">
+            <label for="median">Use Median</label>
+        </div>
+        <div class="ui toggle checkbox" style="display: inline-flex;margin-right: 20px;">
+            <input type="checkbox" id="hideUnrated">
+            <label for="hideUnrated">Hide Unrated Ratings</label>
+        </div>
+        <div class="ui dropdown right labeled icon button" style="display: inline-flex;">
+            <div class="text">Sort By</div>
+            <i class="dropdown icon"></i>
+            <div class="menu">
+                <a class="item" href="javascript:sortProblems(0)">Contest</a>
+                <a class="item" href="javascript:sortProblems(1)">Rating</a>
+                <a class="item" href="javascript:sortProblems(2)">Quality</a>
+            </div>
+        </div>
+        
+        <div class="ui dropdown right labeled icon button" style="display: inline-flex;">
+            <span class="text">选择课程</span>
+            <i class="dropdown icon"></i>
+            <div class="menu" id="dropdown-choosecourse">
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        2023
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(1);">【联赛】2023 CSP/NOIP 未来共同体 集训营</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        2024
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(4);">【省选】NOI2024 省选 OIFC未来共同体 集训营</a>
+                            
+                            <a class="item" href="javascript:init(6);">NOI 2024 训练</a>
+                            
+                            <a class="item" href="javascript:init(7);">【国赛】NOI2024 OIFC未来共同体 集训营-2024.6</a>
+                            
+                            <a class="item" href="javascript:init(8);">【联赛】2024NOIP/CSP OIFC未来共同体 集训营</a>
+                            
+                            <a class="item" href="javascript:init(9);">2024OIFC集训</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        2025
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(10);">【WC】NOI2025 WC OIFC未来共同体 集训营</a>
+                            
+                            <a class="item" href="javascript:init(11);">【省选】NOI2025 省选 OIFC未来共同体 集训营</a>
+                            
+                            <a class="item" href="javascript:init(12);">NOI 2025</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        Misc
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(2);">正式（CCF）赛题</a>
+                            
+                            <a class="item" href="javascript:init(3);">非联考模拟赛</a>
+                            
+                            <a class="item" href="javascript:init(5);">正式（非 CCF）赛题</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        NOI
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(6);">NOI 2024 训练</a>
+                            
+                            <a class="item" href="javascript:init(7);">【国赛】NOI2024 OIFC未来共同体 集训营-2024.6</a>
+                            
+                            <a class="item" href="javascript:init(9);">2024OIFC集训</a>
+                            
+                            <a class="item" href="javascript:init(12);">NOI 2025</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        NOIP
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(8);">【联赛】2024NOIP/CSP OIFC未来共同体 集训营</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        WC
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(10);">【WC】NOI2025 WC OIFC未来共同体 集训营</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        省选
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(4);">【省选】NOI2024 省选 OIFC未来共同体 集训营</a>
+                            
+                            <a class="item" href="javascript:init(11);">【省选】NOI2025 省选 OIFC未来共同体 集训营</a>
+                            
+                        </div>
+                    </div>
+                
+                    <div class="item">
+                        <i class="dropdown icon"></i>
+                        联赛
+                        <div class="menu">
+                            
+                            <a class="item" href="javascript:init(1);">【联赛】2023 CSP/NOIP 未来共同体 集训营</a>
+                            
+                        </div>
+                    </div>
+                
+            </div>
+        </div>
+        <div class="ui info message" style="margin-top: 20px;">
+            您正在查看 <strong id="typename"></strong>
+        </div>
+        <table class="ui celled table" style="margin-top: 40px;font-weight: 450;">
+            <thead>
+                <tr>
+                    <th><a href="javascript:sortProblems(0)"
+                            style="cursor: pointer;text-decoration: none;color: #212529;" id="contest">Contest ▾</a>
+                    </th>
+                    <th>Name</th>
+                    <th><a href="javascript:sortProblems(1)"
+                            style="cursor: pointer;text-decoration: none;color: #212529;" id="difficulty">Rating
+                            ▴</a></th>
+                    <th><a href="javascript:sortProblems(2)"
+                            style="cursor: pointer;text-decoration: none;color: #212529;" id="quality">Quality ▴</a>
+                    </th>
+                    <th>Vote</th>
+                    <th>Show</th>
+                <tr>
+            </thead>
+            <tbody class="problems">
+            </tbody>
+        </table>
+    </div>
+
+    <script src="static/js/index.js"></script>
+    <script src="static/js/circle.js"></script>
+</body>
+
+</html>
