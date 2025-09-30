@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, List
 
 from flask import g, jsonify, request
 
@@ -43,6 +43,16 @@ def register_api_routes(app) -> None:
                 payload = next(iter(datastore.problems_by_type.values()))
             else:
                 payload = {"type": {"id": type_id, "name": ""}, "problems": []}
+        active_user = getattr(g, "user", None)
+        for item in payload.get("problems", []):
+            item.setdefault("tags", item.get("tags") or item.get("meta", {}).get("tags", []))
+            knowledge = item.get("knowledge_difficulty") or item.get("meta", {}).get("knowledge_difficulty")
+            if knowledge:
+                item["knowledge_difficulty"] = knowledge
+            if active_user:
+                item["can_edit_meta"] = datastore.can_user_edit_problem_meta(active_user, item.get("id"))
+            else:
+                item["can_edit_meta"] = False
         return jsonify(payload)
 
     @app.get("/api/uservotes")
@@ -82,13 +92,19 @@ def register_api_routes(app) -> None:
             if vote["user_id"] == user["id"] and vote["problem_id"] == problem_id and not vote.get("deleted"):
                 existing = vote
                 break
+        default_thinking = existing.get("thinking") if existing else float(problem.get("avg_thinking") or problem.get("avg_difficulty") or 2000)
+        default_implementation = existing.get("implementation") if existing else float(problem.get("avg_implementation") or problem.get("avg_difficulty") or 2000)
+        default_quality = existing.get("quality") if existing else float(problem.get("avg_quality") or 3.0)
+        overall_default = existing.get("overall") if existing else float(problem.get("avg_difficulty") or 2000)
         response = {
             "title": problem["title"],
             "url": problem.get("url", ""),
             "contest": problem.get("contest", ""),
             "description": problem.get("description", ""),
-            "difficulty": existing["difficulty"] if existing else int(problem.get("avg_difficulty") or 2000),
-            "quality": existing["quality"] if existing else round(float(problem.get("avg_quality") or 3.0), 2),
+            "thinking": int(round(default_thinking)),
+            "implementation": int(round(default_implementation)),
+            "quality": round(default_quality, 2),
+            "difficulty": int(round(overall_default)),
             "comment": existing.get("comment", "") if existing else "",
             "public": bool(existing.get("public")) if existing else False,
         }
@@ -101,18 +117,30 @@ def register_api_routes(app) -> None:
             return jsonify(error)
         try:
             problem_id = int(request.form.get("pid", 0))
-            difficulty = int(request.form.get("diff", 0))
-            quality = float(request.form.get("qual", 0))
+            thinking_raw = request.form.get("thinking")
+            implementation_raw = request.form.get("implementation")
+            if thinking_raw is None:
+                thinking_raw = request.form.get("diff", "0")
+            if implementation_raw is None:
+                implementation_raw = request.form.get("impl", thinking_raw)
+            thinking = float(thinking_raw)
+            implementation = float(implementation_raw)
+            quality_raw = request.form.get("quality")
+            if quality_raw is None:
+                quality_raw = request.form.get("qual")
+            quality = float(quality_raw) if quality_raw not in {None, "", "null"} else None
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid input"})
         comment = request.form.get("comment", "")
         make_public = request.form.get("public") in {"true", "True", "1", "on", "yes"}
-        if not (800 <= difficulty <= 3500 and 0 <= quality <= 5):
+        if not (800 <= thinking <= 3500 and 800 <= implementation <= 3500):
+            return jsonify({"error": "Out of range"})
+        if quality is not None and not (-5 <= quality <= 5):
             return jsonify({"error": "Out of range"})
         problem = datastore.get_problem(problem_id)
         if not problem:
             return jsonify({"error": "Problem not found"})
-        datastore.upsert_vote(user["id"], problem_id, difficulty, quality, comment, make_public)
+        datastore.upsert_vote(user["id"], problem_id, thinking, implementation, quality, comment, make_public)
         return jsonify({"success": True})
 
     @app.get("/api/check")
@@ -159,6 +187,31 @@ def register_api_routes(app) -> None:
             return jsonify({"error": str(exc)})
         return jsonify({"success": True})
 
+    @app.post("/api/problem/meta")
+    def api_update_problem_meta() -> Any:
+        user, error = api_user_guard()
+        if error:
+            return jsonify(error)
+        try:
+            pid = int(request.form.get("pid", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid problem"})
+        problem = datastore.get_problem(pid)
+        if not problem:
+            return jsonify({"error": "Problem not found"})
+        if not datastore.can_user_edit_problem_meta(user, pid):
+            return jsonify({"error": "Not authorized"})
+        tags_raw = request.form.get("tags", "")
+        knowledge = request.form.get("knowledge", "").strip() or None
+        tags: List[str] = []
+        if tags_raw:
+            for piece in tags_raw.split(","):
+                name = piece.strip()
+                if name and name not in tags:
+                    tags.append(name)
+        datastore.update_problem_meta(pid, tags, knowledge)
+        return jsonify({"success": True, "tags": tags, "knowledge": knowledge})
+
     @app.post("/api/delete")
     def api_delete_vote() -> Any:
         if not g.user or not g.user.get("is_admin"):
@@ -195,7 +248,9 @@ def register_api_routes(app) -> None:
         problem = datastore.get_problem(problem_id)
         if not problem:
             return jsonify({"error": "Problem not found"})
-        avg_diff = float(problem.get("avg_difficulty") or 0)
+        avg_thinking = float(problem.get("avg_thinking") or problem.get("avg_difficulty") or 0)
+        avg_implementation = float(problem.get("avg_implementation") or problem.get("avg_difficulty") or 0)
+        avg_overall = float(problem.get("avg_difficulty") or 0)
         avg_quality = float(problem.get("avg_quality") or 0)
         is_admin = bool(g.user and g.user.get("is_admin"))
         rows = []
@@ -207,12 +262,20 @@ def register_api_routes(app) -> None:
             vote_user = datastore.find_user_by_id(vote["user_id"])
             if not vote_user:
                 continue
+            thinking = vote.get("thinking")
+            implementation = vote.get("implementation")
+            overall = vote.get("overall") or vote.get("difficulty")
+            quality_val = vote.get("quality")
             rows.append({
                 "id": vote["id"],
-                "difficulty": vote["difficulty"],
-                "difficulty_delta": round(vote["difficulty"] - avg_diff, 2),
-                "quality": vote["quality"],
-                "quality_delta": round(vote["quality"] - avg_quality, 2),
+                "thinking": thinking,
+                "thinking_delta": round((thinking or 0) - avg_thinking, 2) if thinking is not None else None,
+                "implementation": implementation,
+                "implementation_delta": round((implementation or 0) - avg_implementation, 2) if implementation is not None else None,
+                "difficulty": overall,
+                "difficulty_delta": round((overall or 0) - avg_overall, 2) if overall is not None else None,
+                "quality": quality_val,
+                "quality_delta": round((quality_val or 0) - avg_quality, 2) if quality_val is not None else None,
                 "comment": vote.get("comment", ""),
                 "deleted": vote.get("deleted", False),
                 "accepted": vote.get("accepted", False),

@@ -35,3 +35,88 @@ span.difficulty-circle {
     font-size: 18px;
     color: #404040;
 }
+
+.knowledge-cell {
+    white-space: nowrap;
+}
+
+.knowledge-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2em 0.8em;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.2;
+    background-color: var(--knowledge-color, #bfbfbf);
+    color: #fff;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 5%);
+    min-width: 4.5em;
+}
+
+.knowledge-tag[data-level="暂无评定"],
+.knowledge-tag[data-level="普及−"],
+.knowledge-tag[data-level="普及/提高−"] {
+    color: #2c3e50;
+}
+
+.knowledge-tag[data-level="暂无评定"] {
+    --knowledge-color: #bfbfbf;
+}
+
+.knowledge-tag[data-level="入门"] {
+    --knowledge-color: #fe4c61;
+}
+
+.knowledge-tag[data-level="普及−"] {
+    --knowledge-color: #f39c11;
+}
+
+.knowledge-tag[data-level="普及/提高−"] {
+    --knowledge-color: #ffc116;
+}
+
+.knowledge-tag[data-level="普及+/提高"] {
+    --knowledge-color: #52c41a;
+}
+
+.knowledge-tag[data-level="提高+/省选−"] {
+    --knowledge-color: #3498db;
+}
+
+.knowledge-tag[data-level="省选/NOI−"] {
+    --knowledge-color: #9d3dcf;
+}
+
+.knowledge-tag[data-level="NOI/NOI+/CTSC"] {
+    --knowledge-color: #0e1d69;
+}
+
+.knowledge-tag[data-level=""] {
+    display: none;
+}
+
+.tags-cell {
+    max-width: 18rem;
+}
+
+.problem-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2em 0.6em;
+    margin: 0 0.35em 0.35em 0;
+    background: #f3f4f6;
+    color: #4b5563;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    border: 1px solid #e5e7eb;
+}
+
+.problem-tag--empty {
+    background: transparent;
+    color: #9ca3af;
+    border: 1px dashed #e5e7eb;
+}

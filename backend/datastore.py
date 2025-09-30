@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -39,6 +40,13 @@ DEFAULT_STORE_PAYLOAD: Dict[str, Any] = {
 }
 DEFAULT_ANNOUNCEMENTS_SEED: Dict[str, Any] = {"announcements": []}
 
+PROBLEM_STATS_SPECS = {
+    "overall": {"avg": "avg_difficulty", "sd": "sd_difficulty", "cnt": "cnt1"},
+    "thinking": {"avg": "avg_thinking", "sd": "sd_thinking", "cnt": "cnt_thinking"},
+    "implementation": {"avg": "avg_implementation", "sd": "sd_implementation", "cnt": "cnt_implementation"},
+    "quality": {"avg": "avg_quality", "sd": "sd_quality", "cnt": "cnt2"},
+}
+
 
 def _clone_default(payload: Any) -> Any:
     return json.loads(json.dumps(payload, ensure_ascii=False))
@@ -46,6 +54,38 @@ def _clone_default(payload: Any) -> Any:
 
 def _now_ts() -> int:
     return int(time.time())
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _elo_win_probability(a: float, b: float) -> float:
+    return 1.0 / (1 + 10 ** ((b - a) / 400.0))
+
+
+def _calc_overall(thinking: float, implementation: float) -> float:
+    left = 1.0
+    right = 8000.0
+    eps = 1e-4
+    while right - left > eps:
+        mid = (left + right) / 2
+        if _elo_win_probability(mid, thinking) * _elo_win_probability(mid, implementation) > 0.5:
+            right = mid
+        else:
+            left = mid
+    return left
+
+
+def _median(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    mid = n // 2
+    if n % 2 == 1:
+        return sorted_vals[mid]
+    return (sorted_vals[mid - 1] + sorted_vals[mid]) / 2
 
 
 class DataStore:
@@ -102,14 +142,58 @@ class DataStore:
         self.store.setdefault("next_vote_id", 1)
         self.store.setdefault("next_contest_id", 1)
         self.store.setdefault("next_category_id", 1)
-        self.store.setdefault("votes", [])
+        votes = self.store.setdefault("votes", [])
         users = self.store.setdefault("users", [])
         for user in users:
+            if "password" in user and not user.get("legacy_password_hash"):
+                user["legacy_password_hash"] = user.pop("password")
+            user.setdefault("password_hash", None)
+            user.setdefault("legacy_password_hash", None)
             user.setdefault("approved", user.get("is_admin", False))
             user.setdefault("banned", False)
             user.setdefault("roles", [])
+            user.setdefault("tag_permissions", [])
+            user.setdefault("luoguid", "")
+            user.setdefault("info", "")
+            user.setdefault("created_at", _now_ts())
             if user.get("is_admin") and "admin" not in user["roles"]:
                 user["roles"].append("admin")
+            # Ensure tag permissions are unique strings
+            normalised_perms = []
+            seen_perm = set()
+            for perm in user.get("tag_permissions", []) or []:
+                perm_str = str(perm).strip()
+                if perm_str and perm_str not in seen_perm:
+                    seen_perm.add(perm_str)
+                    normalised_perms.append(perm_str)
+            user["tag_permissions"] = normalised_perms
+        # Normalise votes to include new metrics
+        for vote in votes:
+            thinking = vote.get("thinking")
+            implementation = vote.get("implementation")
+            overall = vote.get("overall")
+            legacy_difficulty = vote.get("difficulty")
+            if thinking is None and legacy_difficulty is not None:
+                thinking = legacy_difficulty
+            if implementation is None and legacy_difficulty is not None:
+                implementation = legacy_difficulty
+            if overall is None and thinking is not None and implementation is not None:
+                overall = _calc_overall(float(thinking), float(implementation))
+            elif overall is None:
+                overall = legacy_difficulty
+            vote["thinking"] = float(thinking) if thinking is not None else None
+            vote["implementation"] = float(implementation) if implementation is not None else None
+            vote["overall"] = float(overall) if overall is not None else None
+            if vote.get("overall") is not None:
+                vote["difficulty"] = vote["overall"]
+            vote.setdefault("quality", None)
+            vote.setdefault("comment", "")
+            vote.setdefault("public", False)
+            vote.setdefault("deleted", False)
+            vote.setdefault("accepted", True)
+            vote.setdefault("score", 0)
+            vote.setdefault("created_at", vote.get("created_at", _now_ts()))
+            vote.setdefault("updated_at", vote.get("updated_at", vote["created_at"]))
         if self.store["next_problem_id"] < self.next_problem_id:
             self.store["next_problem_id"] = self.next_problem_id
 
@@ -210,6 +294,7 @@ class DataStore:
             problem = self.problem_map.get(int(pid))
             if problem:
                 problem.update(override)
+        self._rebuild_problem_stats()
 
     def _bootstrap_announcements(self) -> None:
         if self.store["announcements"]:
@@ -252,15 +337,80 @@ class DataStore:
             return data
 
     def _init_problem_stats(self, item: Dict[str, Any]) -> None:
-        stats = {}
-        for key, cnt_key, avg_key, sd_key in (("difficulty", "cnt1", "avg_difficulty", "sd_difficulty"), ("quality", "cnt2", "avg_quality", "sd_quality")):
+        stats: Dict[str, Dict[str, float]] = {}
+        for metric, mapping in PROBLEM_STATS_SPECS.items():
+            cnt_key = mapping["cnt"]
+            avg_key = mapping["avg"]
+            sd_key = mapping["sd"]
             count = int(item.get(cnt_key) or 0)
-            avg = float(item.get(avg_key) or 0.0)
-            sd = float(item.get(sd_key) or 0.0)
+            avg_raw = item.get(avg_key)
+            avg = float(avg_raw) if avg_raw is not None else 0.0
+            sd_raw = item.get(sd_key)
+            sd = float(sd_raw) if sd_raw is not None else 0.0
             sum_val = avg * count
             sum_sq = (sd ** 2 + avg ** 2) * count if count else 0.0
-            stats[key] = {"count": count, "sum": sum_val, "sum_sq": sum_sq}
+            stats[metric] = {"count": count, "sum": sum_val, "sum_sq": sum_sq}
+            if count <= 0:
+                item[cnt_key] = 0
+                item[avg_key] = None
+                item[sd_key] = None
+            else:
+                item[cnt_key] = count
+                item[avg_key] = avg
+                item[sd_key] = sd
+        item.setdefault("tags", [])
+        item.setdefault("knowledge_difficulty", None)
+        item.setdefault("meta", {}).setdefault("tags", item.get("tags", []))
+        if "knowledge_difficulty" in item and item["knowledge_difficulty"]:
+                item["meta"].setdefault("knowledge_difficulty", item["knowledge_difficulty"])
         item["_stats"] = stats
+
+    def _reset_problem_stats(self) -> None:
+        for problem in self.problem_map.values():
+            self._init_problem_stats(problem)
+            problem["median_thinking"] = None
+            problem["median_implementation"] = None
+            problem["medium_difficulty"] = None
+            problem["medium_quality"] = None
+
+    def _rebuild_problem_stats(self) -> None:
+        self._reset_problem_stats()
+        for vote in self.store.get("votes", []):
+            if vote.get("deleted"):
+                continue
+            problem_id = vote.get("problem_id")
+            if not problem_id:
+                continue
+            self._adjust_problem_stats(
+                problem_id,
+                thinking=vote.get("thinking"),
+                implementation=vote.get("implementation"),
+                overall=vote.get("overall"),
+                quality=vote.get("quality"),
+            )
+
+    def _update_problem_medians(self, problem_id: int) -> None:
+        problem = self.problem_map.get(problem_id)
+        if not problem:
+            return
+        votes = [
+            vote for vote in self.store.get("votes", [])
+            if vote.get("problem_id") == problem_id and not vote.get("deleted")
+        ]
+        if not votes:
+            problem["median_thinking"] = None
+            problem["median_implementation"] = None
+            problem["medium_difficulty"] = None
+            problem["medium_quality"] = None
+            return
+        thinking_values = [float(v["thinking"]) for v in votes if v.get("thinking") is not None]
+        implementation_values = [float(v["implementation"]) for v in votes if v.get("implementation") is not None]
+        overall_values = [float(v["overall"]) for v in votes if v.get("overall") is not None]
+        quality_values = [float(v["quality"]) for v in votes if v.get("quality") is not None]
+        problem["median_thinking"] = _median(thinking_values)
+        problem["median_implementation"] = _median(implementation_values)
+        problem["medium_difficulty"] = _median(overall_values)
+        problem["medium_quality"] = _median(quality_values)
 
     def _save_store(self) -> None:
         STORE_PATH.write_text(json.dumps(self.store, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -546,6 +696,7 @@ class DataStore:
             "id": self.store["next_user_id"],
             "username": username,
             "password_hash": generate_password_hash(password),
+            "legacy_password_hash": None,
             "is_admin": False,
             "luoguid": luoguid,
             "info": info,
@@ -553,6 +704,7 @@ class DataStore:
             "approved": False,
             "banned": False,
             "roles": [],
+            "tag_permissions": [],
         }
         self.store["next_user_id"] += 1
         self.store.setdefault("users", []).append(user)
@@ -561,7 +713,24 @@ class DataStore:
 
     def update_password(self, user: Dict[str, Any], password: str) -> None:
         user["password_hash"] = generate_password_hash(password)
+        user["legacy_password_hash"] = None
         self._save_store()
+
+    def verify_user_password(self, user: Dict[str, Any], password: str) -> bool:
+        if not user:
+            return False
+        password_hash = user.get("password_hash")
+        if password_hash:
+            try:
+                if check_password_hash(password_hash, password):
+                    return True
+            except ValueError:
+                pass
+        legacy_hash = user.get("legacy_password_hash")
+        if legacy_hash and _sha256_hex(password) == legacy_hash:
+            self.update_password(user, password)
+            return True
+        return False
 
     def approve_user(self, user_id: int) -> bool:
         user = self.find_user_by_id(user_id)
@@ -602,38 +771,103 @@ class DataStore:
         self._save_store()
         return True
 
+    def add_tag_permission(self, user_id: int, permission: str, *, save: bool = True) -> bool:
+        user = self.find_user_by_id(user_id)
+        if not user:
+            return False
+        perm = permission.strip()
+        if not perm:
+            raise ValueError("标签权限不能为空")
+        perms = user.setdefault("tag_permissions", [])
+        if perm in perms:
+            return False
+        perms.append(perm)
+        if save:
+            self._save_store()
+        return True
+
+    def remove_tag_permission(self, user_id: int, permission: str, *, save: bool = True) -> bool:
+        user = self.find_user_by_id(user_id)
+        if not user:
+            return False
+        perm = permission.strip()
+        perms = user.setdefault("tag_permissions", [])
+        if perm not in perms:
+            return False
+        user["tag_permissions"] = [p for p in perms if p != perm]
+        if save:
+            self._save_store()
+        return True
+
     def clear_votes_for_user(self, user_id: int) -> int:
         cleared, _ = self._remove_votes_matching(lambda vote: vote.get("user_id") == user_id)
         return cleared
 
     # Vote operations ---------------------------------------------------
 
-    def upsert_vote(self, user_id: int, problem_id: int, difficulty: int, quality: float, comment: str, make_public: bool) -> Dict[str, Any]:
+    def upsert_vote(
+        self,
+        user_id: int,
+        problem_id: int,
+        thinking: float,
+        implementation: float,
+        quality: Optional[float],
+        comment: str,
+        make_public: bool,
+        *,
+        save: bool = True,
+    ) -> Dict[str, Any]:
         existing = None
         for vote in self.store.get("votes", []):
             if vote["user_id"] == user_id and vote["problem_id"] == problem_id:
                 existing = vote
                 break
         timestamp = _now_ts()
+        thinking_val = float(thinking)
+        implementation_val = float(implementation)
+        overall_val = _calc_overall(thinking_val, implementation_val)
+        quality_val = None if quality is None else float(quality)
         if existing:
-            self._adjust_problem_stats(problem_id, existing["difficulty"], existing["quality"], remove=True)
+            self._adjust_problem_stats(
+                problem_id,
+                thinking=existing.get("thinking"),
+                implementation=existing.get("implementation"),
+                overall=existing.get("overall") or existing.get("difficulty"),
+                quality=existing.get("quality"),
+                remove=True,
+            )
             existing.update({
-                "difficulty": difficulty,
-                "quality": quality,
+                "thinking": thinking_val,
+                "implementation": implementation_val,
+                "overall": overall_val,
+                "difficulty": overall_val,
+                "quality": quality_val,
                 "comment": comment,
                 "public": make_public,
                 "deleted": False,
+                "accepted": True,
+                "score": existing.get("score", 0),
                 "updated_at": timestamp,
             })
-            self._adjust_problem_stats(problem_id, difficulty, quality)
-            self._save_store()
+            self._adjust_problem_stats(
+                problem_id,
+                thinking=thinking_val,
+                implementation=implementation_val,
+                overall=overall_val,
+                quality=quality_val,
+            )
+            if save:
+                self._save_store()
             return existing
         vote = {
             "id": self.store["next_vote_id"],
             "user_id": user_id,
             "problem_id": problem_id,
-            "difficulty": difficulty,
-            "quality": quality,
+            "thinking": thinking_val,
+            "implementation": implementation_val,
+            "overall": overall_val,
+            "difficulty": overall_val,
+            "quality": quality_val,
             "comment": comment,
             "public": make_public,
             "deleted": False,
@@ -644,64 +878,70 @@ class DataStore:
         }
         self.store["next_vote_id"] += 1
         self.store.setdefault("votes", []).append(vote)
-        self._adjust_problem_stats(problem_id, difficulty, quality)
-        self._save_store()
+        self._adjust_problem_stats(
+            problem_id,
+            thinking=thinking_val,
+            implementation=implementation_val,
+            overall=overall_val,
+            quality=quality_val,
+        )
+        if save:
+            self._save_store()
         return vote
 
-    def _adjust_problem_stats(self, problem_id: int, difficulty: Optional[float], quality: Optional[float], remove: bool = False) -> None:
+    def _adjust_problem_stats(
+        self,
+        problem_id: int,
+        *,
+        thinking: Optional[float],
+        implementation: Optional[float],
+        overall: Optional[float],
+        quality: Optional[float],
+        remove: bool = False,
+    ) -> None:
         problem = self.problem_map.get(problem_id)
         if not problem:
             return
         stats = problem.get("_stats", {})
         if not stats:
             return
-        if difficulty is not None:
-            block = stats["difficulty"]
-            if remove:
-                block["count"] = max(0, block["count"] - 1)
-                block["sum"] -= difficulty
-                block["sum_sq"] = max(0.0, block["sum_sq"] - difficulty ** 2)
-            else:
-                block["count"] += 1
-                block["sum"] += difficulty
-                block["sum_sq"] += difficulty ** 2
-            self._recompute_problem_metric(problem, "difficulty")
-        if quality is not None:
-            block = stats["quality"]
-            if remove:
-                block["count"] = max(0, block["count"] - 1)
-                block["sum"] -= quality
-                block["sum_sq"] = max(0.0, block["sum_sq"] - quality ** 2)
-            else:
-                block["count"] += 1
-                block["sum"] += quality
-                block["sum_sq"] += quality ** 2
-            self._recompute_problem_metric(problem, "quality")
 
-    def _recompute_problem_metric(self, problem: Dict[str, Any], metric: str) -> None:
-        block = problem["_stats"][metric]
-        count = block["count"]
-        if count <= 0:
-            if metric == "difficulty":
-                problem["avg_difficulty"] = None
-                problem["sd_difficulty"] = None
-                problem["cnt1"] = 0
+        def update_metric(metric: str, value: Optional[float]) -> None:
+            if value is None or metric not in stats:
+                return
+            block = stats[metric]
+            if remove:
+                block["count"] = max(0, block["count"] - 1)
+                block["sum"] -= value
+                block["sum_sq"] -= value ** 2
+                if block["count"] <= 0:
+                    block["sum"] = 0.0
+                    block["sum_sq"] = 0.0
             else:
-                problem["avg_quality"] = None
-                problem["sd_quality"] = None
-                problem["cnt2"] = 0
-            return
-        avg = block["sum"] / count
-        variance = max(0.0, block["sum_sq"] / count - avg ** 2)
-        sd = variance ** 0.5
-        if metric == "difficulty":
-            problem["avg_difficulty"] = avg
-            problem["sd_difficulty"] = sd
-            problem["cnt1"] = count
-        else:
-            problem["avg_quality"] = avg
-            problem["sd_quality"] = sd
-            problem["cnt2"] = count
+                block["count"] += 1
+                block["sum"] += value
+                block["sum_sq"] += value ** 2
+            block["sum_sq"] = max(0.0, block["sum_sq"])
+            mapping = PROBLEM_STATS_SPECS[metric]
+            count = block["count"]
+            if count <= 0:
+                problem[mapping["cnt"]] = 0
+                problem[mapping["avg"]] = None
+                problem[mapping["sd"]] = None
+                block["sum"] = 0.0
+                block["sum_sq"] = 0.0
+                return
+            avg = block["sum"] / count
+            variance = max(0.0, block["sum_sq"] / count - avg ** 2)
+            problem[mapping["cnt"]] = count
+            problem[mapping["avg"]] = avg
+            problem[mapping["sd"]] = variance ** 0.5
+
+        update_metric("thinking", thinking)
+        update_metric("implementation", implementation)
+        update_metric("overall", overall)
+        update_metric("quality", quality)
+        self._update_problem_medians(problem_id)
 
     def _remove_votes_matching(self, predicate: Callable[[Dict[str, Any]], bool]) -> Tuple[int, List[int]]:
         votes = self.store.get("votes", [])
@@ -720,7 +960,14 @@ class DataStore:
                 vote_id = 0
             removed_vote_ids.append(vote_id)
             if not vote.get("deleted"):
-                self._adjust_problem_stats(vote.get("problem_id"), vote.get("difficulty"), vote.get("quality"), remove=True)
+                self._adjust_problem_stats(
+                    vote.get("problem_id"),
+                    thinking=vote.get("thinking"),
+                    implementation=vote.get("implementation"),
+                    overall=vote.get("overall") or vote.get("difficulty"),
+                    quality=vote.get("quality"),
+                    remove=True,
+                )
                 cleared += 1
         if not removed_vote_ids:
             return cleared, removed_vote_ids
@@ -781,6 +1028,8 @@ class DataStore:
         payload.setdefault("url", "")
         payload.setdefault("description", "")
         payload.setdefault("contest", "")
+        payload.setdefault("tags", [])
+        payload.setdefault("knowledge_difficulty", None)
         payload.setdefault("avg_difficulty", None)
         payload.setdefault("avg_quality", None)
         payload.setdefault("sd_difficulty", None)
@@ -791,6 +1040,10 @@ class DataStore:
         payload.setdefault("medium_quality", None)
         payload["id"] = problem_id
         payload["is_custom"] = True
+        meta = payload.setdefault("meta", {})
+        meta.setdefault("tags", list(payload.get("tags", [])))
+        if payload.get("knowledge_difficulty"):
+            meta.setdefault("knowledge_difficulty", payload["knowledge_difficulty"])
         self._init_problem_stats(payload)
         self.store.setdefault("custom_problems", []).append(payload)
         self.problem_map[problem_id] = payload
@@ -806,6 +1059,262 @@ class DataStore:
         if not self._delete_problem(problem_id, require_custom=False, save=True):
             raise ValueError("题目不存在或无法删除")
         return True
+
+    def update_problem_meta(
+        self,
+        problem_id: int,
+        tags: Iterable[str],
+        knowledge_difficulty: Optional[str],
+        *,
+        save: bool = True,
+    ) -> bool:
+        problem = self.problem_map.get(problem_id)
+        if not problem:
+            return False
+        cleaned_tags: List[str] = []
+        seen = set()
+        for tag in tags or []:
+            tag_str = str(tag).strip()
+            if tag_str and tag_str not in seen:
+                seen.add(tag_str)
+                cleaned_tags.append(tag_str)
+        knowledge_value = knowledge_difficulty.strip() if knowledge_difficulty else None
+        problem["tags"] = cleaned_tags
+        problem["knowledge_difficulty"] = knowledge_value
+        meta = problem.setdefault("meta", {})
+        meta["tags"] = cleaned_tags
+        if knowledge_value:
+            meta["knowledge_difficulty"] = knowledge_value
+        else:
+            meta.pop("knowledge_difficulty", None)
+        overrides = self.store.setdefault("problem_overrides", {})
+        entry = dict(overrides.get(str(problem_id), {}))
+        entry["tags"] = cleaned_tags
+        entry["knowledge_difficulty"] = knowledge_value
+        meta_override = dict(entry.get("meta", {}))
+        meta_override["tags"] = cleaned_tags
+        if knowledge_value:
+            meta_override["knowledge_difficulty"] = knowledge_value
+        else:
+            meta_override.pop("knowledge_difficulty", None)
+        entry["meta"] = meta_override
+        overrides[str(problem_id)] = entry
+        if save:
+            self._save_store()
+        return True
+
+    def can_user_edit_problem_meta(self, user: Optional[Dict[str, Any]], problem_id: int) -> bool:
+        if not user:
+            return False
+        if user.get("is_admin"):
+            return True
+        problem = self.problem_map.get(problem_id)
+        if not problem:
+            return False
+        title = problem.get("title", "")
+        for perm in user.get("tag_permissions", []) or []:
+            if perm and perm in title:
+                return True
+        return False
+
+    def import_legacy_config(
+        self,
+        *,
+        users_path: Path,
+        votes_path: Path,
+        problems_path: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        summary = {
+            "users_created": 0,
+            "users_updated": 0,
+            "tag_permissions_updated": 0,
+            "problems_created": 0,
+            "problems_updated": 0,
+            "votes_imported": 0,
+            "votes_updated": 0,
+            "skipped_votes": 0,
+        }
+
+        if not users_path.exists() or not votes_path.exists():
+            raise FileNotFoundError("缺少 legacy 配置文件")
+
+        legacy_users = json.loads(users_path.read_text(encoding="utf-8"))
+        legacy_votes_payload = json.loads(votes_path.read_text(encoding="utf-8"))
+        legacy_votes = legacy_votes_payload.get("votes", {})
+        legacy_comments = legacy_votes_payload.get("comments", {})
+        legacy_problem_metas = legacy_votes_payload.get("problem_metas", {})
+
+        legacy_urls: Dict[str, str] = {}
+        if problems_path and problems_path.exists():
+            lines = [line.strip() for line in problems_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            for idx in range(0, len(lines), 2):
+                title = lines[idx]
+                url = lines[idx + 1] if idx + 1 < len(lines) else ""
+                legacy_urls[title] = url
+
+        def ensure_category_id(name: str) -> int:
+            for category in self.store.get("course_categories", []):
+                if category.get("name") == name:
+                    return int(category.get("id"))
+            entry = self.create_category(name)
+            return entry["id"]
+
+        def ensure_course_id(name: str, category_id: int) -> int:
+            for type_id, info in self.types.items():
+                if info.get("name") == name:
+                    self.set_course_categories(type_id, [category_id])
+                    return type_id
+            entry = self.create_course(name, [category_id])
+            return entry["id"]
+
+        legacy_category_id = ensure_category_id("legacy")
+        legacy_course_id = ensure_course_id("25年暑期题单", legacy_category_id)
+
+        user_lookup = {user["username"].lower(): user for user in self.store.get("users", [])}
+        for username, info in legacy_users.items():
+            username_lower = username.lower()
+            created = False
+            if username_lower in user_lookup:
+                user = user_lookup[username_lower]
+                summary["users_updated"] += 1
+            else:
+                user = {
+                    "id": self.store["next_user_id"],
+                    "username": username,
+                    "password_hash": None,
+                    "legacy_password_hash": None,
+                    "is_admin": False,
+                    "luoguid": "",
+                    "info": "",
+                    "created_at": int(info.get("created_at", _now_ts())),
+                    "approved": True,
+                    "banned": False,
+                    "roles": [],
+                    "tag_permissions": [],
+                }
+                self.store["next_user_id"] += 1
+                self.store.setdefault("users", []).append(user)
+                user_lookup[username_lower] = user
+                summary["users_created"] += 1
+                created = True
+            user["legacy_password_hash"] = info.get("password")
+            if created or not user.get("password_hash"):
+                user["password_hash"] = user.get("password_hash")
+            user["is_admin"] = bool(info.get("is_admin"))
+            user["banned"] = bool(info.get("banned", False))
+            roles = set(user.get("roles", []))
+            if user["is_admin"]:
+                roles.add("admin")
+            else:
+                roles.discard("admin")
+            user["roles"] = sorted(roles)
+            perms_before = set(user.get("tag_permissions", []))
+            perms_after = set(perms_before)
+            for perm in info.get("tag_permissions", []) or []:
+                perm_str = str(perm).strip()
+                if perm_str:
+                    perms_after.add(perm_str)
+            if perms_after != perms_before:
+                user["tag_permissions"] = sorted(perms_after)
+                summary["tag_permissions_updated"] += 1
+
+        comment_lookup: Dict[Tuple[str, str], str] = {}
+        for problem_title, entries in legacy_comments.items():
+            for entry in entries or []:
+                author = str(entry.get("user", "")).strip()
+                text = str(entry.get("text", "")).strip()
+                if not author or not text:
+                    continue
+                key = (problem_title, author)
+                if key in comment_lookup:
+                    comment_lookup[key] = comment_lookup[key] + "\n" + text
+                else:
+                    comment_lookup[key] = text
+
+        def derive_contest_name(title: str) -> str:
+            token = title[:6]
+            if token.isdigit():
+                year = int(token[:2])
+                month = int(token[2:4])
+                day = int(token[4:6])
+                year += 2000
+                try:
+                    return f"{year:04d}-{month:02d}-{day:02d}"
+                except ValueError:
+                    return token
+            return token if token else "Legacy"
+
+        for problem_title, votes in legacy_votes.items():
+            contest_name = derive_contest_name(problem_title)
+            existing_problem = None
+            bucket = self.problems_by_type.get(legacy_course_id, {}).get("problems", [])
+            for problem in bucket:
+                if problem.get("title") == problem_title:
+                    existing_problem = problem
+                    break
+            if existing_problem:
+                summary["problems_updated"] += 1
+            else:
+                payload = {
+                    "type": legacy_course_id,
+                    "contest": contest_name,
+                    "title": problem_title,
+                    "url": legacy_urls.get(problem_title, ""),
+                    "description": "",
+                }
+                existing_problem = self.create_problem(payload)
+                summary["problems_created"] += 1
+                bucket = self.problems_by_type.get(legacy_course_id, {}).get("problems", [])
+
+            if existing_problem.get("contest") != contest_name:
+                existing_problem["contest"] = contest_name
+            if not existing_problem.get("url") and legacy_urls.get(problem_title):
+                existing_problem["url"] = legacy_urls[problem_title]
+
+            meta_info = legacy_problem_metas.get(problem_title, {}) or {}
+            tags_text = meta_info.get("tags", "")
+            tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+            knowledge_level = meta_info.get("difficulty")
+            self.update_problem_meta(existing_problem["id"], tags, knowledge_level, save=False)
+
+            for vote in votes or []:
+                voter = str(vote.get("voter", "")).strip()
+                if not voter:
+                    summary["skipped_votes"] += 1
+                    continue
+                voter_user = user_lookup.get(voter.lower())
+                if not voter_user:
+                    summary["skipped_votes"] += 1
+                    continue
+                thinking_val = float(vote.get("thinking", vote.get("difficulty", 0)))
+                implementation_val = float(vote.get("implementing", vote.get("implementation", vote.get("difficulty", 0))))
+                quality_val = vote.get("quality")
+                comment = comment_lookup.get((problem_title, voter), "")
+                previous_vote = None
+                for existing_vote in self.store.get("votes", []):
+                    if existing_vote["user_id"] == voter_user["id"] and existing_vote["problem_id"] == existing_problem["id"]:
+                        previous_vote = existing_vote
+                        break
+                result = self.upsert_vote(
+                    voter_user["id"],
+                    existing_problem["id"],
+                    thinking_val,
+                    implementation_val,
+                    quality_val,
+                    comment,
+                    False,
+                    save=False,
+                )
+                if previous_vote and previous_vote is result:
+                    summary["votes_updated"] += 1
+                elif previous_vote:
+                    summary["votes_updated"] += 1
+                else:
+                    summary["votes_imported"] += 1
+
+        self._rebuild_problem_stats()
+        self._save_store()
+        return summary
 
     def _delete_problem(self, problem_id: int, require_custom: bool, save: bool) -> bool:
         problem = self.problem_map.get(problem_id)

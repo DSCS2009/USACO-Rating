@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from flask import abort, flash, g, redirect, render_template, request, session, url_for
@@ -313,6 +314,39 @@ def register_admin_routes(app) -> None:
             flash("该用户暂无可清除的评分", "warning")
         return redirect(url_for("admin_dashboard"))
 
+    @app.post("/admin/users/<int:user_id>/tag-permissions")
+    def admin_add_tag_permission(user_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        permission = request.form.get("permission", "").strip()
+        if not permission:
+            flash("请输入有效的标签名称", "error")
+            return redirect(url_for("admin_dashboard"))
+        try:
+            if datastore.add_tag_permission(user_id, permission):
+                flash("标签权限已添加", "success")
+            else:
+                flash("用户已拥有该标签权限", "info")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("admin_dashboard"))
+
+    @app.post("/admin/users/<int:user_id>/tag-permissions/remove")
+    def admin_remove_tag_permission(user_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        permission = request.form.get("permission", "").strip()
+        if not permission:
+            flash("标签名称无效", "error")
+            return redirect(url_for("admin_dashboard"))
+        if datastore.remove_tag_permission(user_id, permission):
+            flash("标签权限已移除", "info")
+        else:
+            flash("未找到对应的标签权限", "warning")
+        return redirect(url_for("admin_dashboard"))
+
     @app.post("/admin/users/password")
     def admin_reset_user_password() -> Any:
         require_admin()
@@ -351,3 +385,30 @@ def register_admin_routes(app) -> None:
         else:
             flash("请选择要删除的评分", "warning")
         return redirect(url_for("problem_detail", problem_id=problem_id))
+
+    @app.post("/admin/import/legacy")
+    def admin_import_legacy() -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        legacy_dir = Path(app.root_path).parent / "vote"
+        users_path = legacy_dir / "user.json"
+        votes_path = legacy_dir / "votes.json"
+        problems_path = legacy_dir / "problem.txt"
+        try:
+            summary = datastore.import_legacy_config(
+                users_path=users_path,
+                votes_path=votes_path,
+                problems_path=problems_path,
+            )
+        except FileNotFoundError:
+            flash("未找到 legacy 配置文件", "error")
+        except Exception as exc:
+            flash(f"导入失败：{exc}", "error")
+        else:
+            flash(
+                "导入完成：新增用户 {users_created}，更新用户 {users_updated}，标签权限更新 {tag_permissions_updated}，新增题目 {problems_created}，"\
+                "更新题目 {problems_updated}，导入评分 {votes_imported}，更新评分 {votes_updated}，跳过 {skipped_votes}".format(**summary),
+                "success",
+            )
+        return redirect(url_for("admin_dashboard"))

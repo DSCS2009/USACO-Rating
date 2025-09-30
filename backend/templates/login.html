@@ -19,9 +19,6 @@
                 <input id="csrf_token" name="csrf_token" type="hidden" value="{{ csrf_token() }}">
                 <button type="submit" class="ui primary button" style="width: 100%;">登录</button>
             </form>
-            <div style="margin-top: 1em; text-align: center;">
-                <a href="{{ url_for('reset_password') }}">重置密码</a>
-            </div>
         </div>
     </div>
 </div>

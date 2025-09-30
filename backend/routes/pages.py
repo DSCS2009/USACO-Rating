@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from flask import abort, flash, g, redirect, render_template, request, session, url_for
-from werkzeug.security import check_password_hash
 
 from ..auth import validate_csrf
 from ..datastore import DataStore
@@ -49,7 +48,7 @@ def register_page_routes(app) -> None:
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
             user = datastore.find_user_by_username(username) if username else None
-            if not user or not check_password_hash(user["password_hash"], password):
+            if not user or not datastore.verify_user_password(user, password):
                 flash("用户名或密码错误", "error")
             elif not user.get("approved"):
                 flash("账户尚未通过审核，无法登录。", "error")
@@ -75,42 +74,29 @@ def register_page_routes(app) -> None:
 
     @app.route("/reset", methods=["GET", "POST"])
     def reset_password() -> Any:
-        if request.method == "POST":
-            if not validate_csrf(request.form.get("csrf_token")):
-                abort(400, description="Invalid CSRF token")
-            luoguid = request.form.get("luoguid", "").strip()
-            pasteid = request.form.get("pasteid", "").strip()
-            password = request.form.get("password", "")
-            password2 = request.form.get("password2", "")
-            if not (luoguid and pasteid and password and password2):
-                flash("请填写所有字段", "error")
-            elif password != password2:
-                flash("两次输入的密码不一致", "error")
-            else:
-                target = None
-                for user in datastore.store.get("users", []):
-                    if user.get("luoguid") == luoguid:
-                        target = user
-                        break
-                if not target:
-                    flash("未找到对应用户", "error")
-                else:
-                    datastore.update_password(target, password)
-                    flash("密码已更新，请重新登录", "success")
-                    return redirect(url_for("login"))
-        return render_template("reset.html", active_page="reset")
+        abort(404)
 
     @app.route("/profile/<int:user_id>")
     def profile(user_id: int) -> str:
         user = datastore.find_user_by_id(user_id)
         if not user:
             abort(404)
-        votes = [vote for vote in datastore.store.get("votes", []) if vote["user_id"] == user_id and not vote.get("deleted")]
+        viewer = getattr(g, "user", None)
+        is_admin = bool(viewer and viewer.get("is_admin"))
+        votes = [
+            vote
+            for vote in datastore.store.get("votes", [])
+            if vote["user_id"] == user_id and not vote.get("deleted")
+        ]
         votes.sort(key=lambda x: -x.get("created_at", 0))
         enriched = []
         difficulty_deltas = []
         quality_deltas = []
+        thinking_deltas = []
+        implementation_deltas = []
         for vote in votes:
+            if not is_admin and not vote.get("public"):
+                continue
             problem = datastore.get_problem(vote["problem_id"])
             if not problem:
                 continue
@@ -120,8 +106,16 @@ def register_page_routes(app) -> None:
             avg_quality = problem.get("avg_quality")
             if avg_quality is not None:
                 quality_deltas.append(vote["quality"] - float(avg_quality))
+            avg_thinking = problem.get("avg_thinking") or avg_difficulty
+            if avg_thinking is not None and vote.get("thinking") is not None:
+                thinking_deltas.append(vote["thinking"] - float(avg_thinking))
+            avg_implementation = problem.get("avg_implementation") or avg_difficulty
+            if avg_implementation is not None and vote.get("implementation") is not None:
+                implementation_deltas.append(vote["implementation"] - float(avg_implementation))
             enriched.append({
                 "problem": {"id": problem["id"], "title": problem["title"]},
+                "thinking": vote.get("thinking"),
+                "implementation": vote.get("implementation"),
                 "difficulty": vote["difficulty"],
                 "quality": vote["quality"],
                 "comment": vote.get("comment", ""),
@@ -134,8 +128,12 @@ def register_page_routes(app) -> None:
             last_vote_ts = None
         avg_diff_delta = sum(difficulty_deltas) / len(difficulty_deltas) if difficulty_deltas else None
         avg_quality_delta = sum(quality_deltas) / len(quality_deltas) if quality_deltas else None
+        avg_thinking_delta = sum(thinking_deltas) / len(thinking_deltas) if thinking_deltas else None
+        avg_impl_delta = sum(implementation_deltas) / len(implementation_deltas) if implementation_deltas else None
         stats = {
             "total_votes": len(enriched),
+            "avg_thinking_delta": avg_thinking_delta,
+            "avg_implementation_delta": avg_impl_delta,
             "avg_difficulty_delta": avg_diff_delta,
             "avg_quality_delta": avg_quality_delta,
             "last_vote": last_vote_ts,
@@ -165,6 +163,8 @@ def register_page_routes(app) -> None:
             entry = {
                 "id": vote["id"],
                 "user": {"id": user["id"], "username": user["username"]},
+                "thinking": vote.get("thinking"),
+                "implementation": vote.get("implementation"),
                 "difficulty": vote["difficulty"],
                 "quality": vote["quality"],
                 "comment": vote.get("comment", ""),

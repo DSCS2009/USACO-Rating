@@ -22,14 +22,22 @@
         <div class="ui segment">
             <h3 class="ui header">统计</h3>
             <p><strong>总评分数：</strong> {{ stats.total_votes }}</p>
-            <div class="ui two statistics" style="margin-top: 1em;">
+            <div class="ui four statistics" style="margin-top: 1em;">
+                <div class="statistic">
+                    <div class="value">{{ '%+.2f'|format(stats.avg_thinking_delta) if stats.avg_thinking_delta is not none else 'N/A' }}</div>
+                    <div class="label">思维 Δ</div>
+                </div>
+                <div class="statistic">
+                    <div class="value">{{ '%+.2f'|format(stats.avg_implementation_delta) if stats.avg_implementation_delta is not none else 'N/A' }}</div>
+                    <div class="label">实现 Δ</div>
+                </div>
                 <div class="statistic">
                     <div class="value">{{ '%+.2f'|format(stats.avg_difficulty_delta) if stats.avg_difficulty_delta is not none else 'N/A' }}</div>
-                    <div class="label">平均难度 Δ</div>
+                    <div class="label">综合 Δ</div>
                 </div>
                 <div class="statistic">
                     <div class="value">{{ '%+.2f'|format(stats.avg_quality_delta) if stats.avg_quality_delta is not none else 'N/A' }}</div>
-                    <div class="label">平均质量 Δ</div>
+                    <div class="label">质量 Δ</div>
                 </div>
             </div>
             <p style="margin-top: 1em;"><strong>最近评分时间：</strong> {% if stats.last_vote %}<span class="time-display" data-timestamp="{{ stats.last_vote }}" data-format="relative"></span>{% else %}暂无{% endif %}</p>
@@ -42,7 +50,9 @@
         <tr>
             <th>时间</th>
             <th>题目</th>
-            <th>难度</th>
+            <th>思维</th>
+            <th>实现</th>
+            <th>综合</th>
             <th>质量</th>
             <th>评论</th>
             <th>公开</th>
@@ -53,8 +63,10 @@
         <tr>
             <td><span class="time-display" data-timestamp="{{ vote.created_at }}"></span></td>
             <td><a href="{{ url_for('problem_detail', problem_id=vote.problem.id) }}">{{ vote.problem.title }}</a></td>
-            <td>{{ vote.difficulty }}</td>
-            <td>{{ '%.2f'|format(vote.quality) }}</td>
+            <td>{{ '%.0f'|format(vote.thinking) if vote.thinking is not none else 'N/A' }}</td>
+            <td>{{ '%.0f'|format(vote.implementation) if vote.implementation is not none else 'N/A' }}</td>
+            <td>{{ '%.0f'|format(vote.difficulty) if vote.difficulty is not none else 'N/A' }}</td>
+            <td>{{ '%.2f'|format(vote.quality) if vote.quality is not none else 'N/A' }}</td>
             <td>{{ vote.comment or '' }}</td>
             <td>{{ '是' if vote.public else '否' }}</td>
         </tr>

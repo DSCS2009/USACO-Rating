@@ -72,6 +72,14 @@
         </div>
     </div>
 </div>
+<div class="ui segment" style="margin-top: 1.5em;">
+    <h3 class="ui header">Legacy 配置导入</h3>
+    <p>将 <code>./vote</code> 下的用户、题目与评分导入到 <strong>legacy / 25年暑期题单</strong> 中。</p>
+    <form class="ui form" method="post" action="{{ url_for('admin_import_legacy') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ui button" type="submit">导入旧版配置</button>
+    </form>
+</div>
 {% if pending_users %}
 <h3 class="ui dividing header" style="margin-top: 2em;">待审核注册</h3>
 <table class="ui celled table">
@@ -117,6 +125,7 @@
             <th>用户名</th>
             <th>角色</th>
             <th>状态</th>
+            <th>标签权限</th>
             <th>操作</th>
         </tr>
     </thead>
@@ -135,6 +144,28 @@
                 {% if not user.approved %}
                     <span class="ui orange label">待审核</span>
                 {% endif %}
+            </td>
+            <td style="min-width: 16rem;">
+                {% if user.tag_permissions %}
+                <div class="ui labels" style="margin-bottom: 0.5em;">
+                    {% for perm in user.tag_permissions %}
+                    <form method="post" action="{{ url_for('admin_remove_tag_permission', user_id=user.id) }}" style="display:inline-block; margin: 0 0.25em 0.25em 0;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="permission" value="{{ perm }}">
+                        <button class="ui mini basic label" type="submit">{{ perm }} <i class="close icon"></i></button>
+                    </form>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <span class="ui grey label">暂无</span>
+                {% endif %}
+                <form method="post" action="{{ url_for('admin_add_tag_permission', user_id=user.id) }}" class="ui form" style="margin:0;">
+                    <div class="ui action input mini">
+                        <input type="text" name="permission" placeholder="新增标签">
+                        <button class="ui mini button" type="submit">添加</button>
+                    </div>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                </form>
             </td>
             <td>
                 <div class="ui horizontal list">
