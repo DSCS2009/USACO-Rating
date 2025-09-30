@@ -10,6 +10,18 @@ var datav = null;
 var isAdmin = false;
 var nowType = 1;
 
+function escapeHtml(value) {
+    if (value === undefined || value === null) {
+        return '';
+    }
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function load_announcement() {
     let last_seen = localStorage.getItem("last_seen");
     localStorage.setItem("last_seen", Date.now() / 1000);
@@ -403,7 +415,7 @@ function vote(id) {
                     </div>
                     <div class="field">
                         <label>评论：</label>
-                        <textarea rows="5" id="comment">${data.comment}</textarea>
+                        <textarea rows="5" id="comment"></textarea>
                     </div>
                 </form>
             </div>
@@ -417,6 +429,7 @@ function vote(id) {
         </div>
         `;
         document.body.appendChild(modal);
+        $('#comment').val(data.comment || '');
         // console.log(modal);
         $('#voteModal').modal('show');
         // destroy on hide
@@ -738,7 +751,7 @@ function showVotes(id) {
                     select: 3,
                     sortable: false,
                     render: function (data, type, row) {
-                        return row.comment;
+                        return escapeHtml(row.comment).replace(/\n/g, '<br>');
                     },
                     width: "35%"
                 },
