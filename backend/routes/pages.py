@@ -83,6 +83,8 @@ def register_page_routes(app) -> None:
             abort(404)
         viewer = getattr(g, "user", None)
         is_admin = bool(viewer and viewer.get("is_admin"))
+        is_profile_owner = bool(viewer and viewer.get("id") == user_id)
+        can_view_private = is_admin or is_profile_owner
         votes = [
             vote
             for vote in datastore.store.get("votes", [])
@@ -95,7 +97,7 @@ def register_page_routes(app) -> None:
         thinking_deltas = []
         implementation_deltas = []
         for vote in votes:
-            if not is_admin and not vote.get("public"):
+            if not can_view_private and not vote.get("public"):
                 continue
             problem = datastore.get_problem(vote["problem_id"])
             if not problem:
