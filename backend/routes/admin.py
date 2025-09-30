@@ -30,13 +30,26 @@ def register_admin_routes(app) -> None:
         courses = datastore.list_types()
         course_contests = {course["id"]: datastore.list_course_contests(course["id"]) for course in courses}
         custom_courses = [course for course in courses if course["id"] in datastore.custom_types]
+        custom_course_ids = {course["id"] for course in custom_courses}
+        categories = datastore.list_categories()
+        course_category_map = {
+            course["id"]: datastore.get_category_ids_for_course(course["id"])
+            for course in courses
+        }
+        category_usage = {
+            category["id"]: sum(1 for ids in course_category_map.values() if category["id"] in ids)
+            for category in categories
+        }
         return render_template(
             "admin.html",
             stats=stats,
             announcements=announcements,
             types=courses,
             course_contests=course_contests,
-            custom_courses=custom_courses,
+            custom_course_ids=custom_course_ids,
+            categories=categories,
+            course_category_map=course_category_map,
+            category_usage=category_usage,
             pending_users=pending_users,
             active_users=active_users,
             active_page="admin",
@@ -118,8 +131,9 @@ def register_admin_routes(app) -> None:
         if not validate_csrf(request.form.get("csrf_token")):
             abort(400, description="Invalid CSRF token")
         name = request.form.get("name", "").strip()
+        category_ids = request.form.getlist("category_ids")
         try:
-            datastore.create_course(name)
+            datastore.create_course(name, category_ids)
         except ValueError as exc:
             flash(str(exc), "error")
         else:
@@ -176,6 +190,55 @@ def register_admin_routes(app) -> None:
             flash("比赛已删除", "info")
         else:
             flash("未找到要删除的比赛", "error")
+        return redirect(url_for("admin_dashboard"))
+
+    @app.post("/admin/course/categories")
+    def admin_update_course_categories() -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        try:
+            type_id = int(request.form.get("type_id", "0"))
+        except (TypeError, ValueError):
+            flash("请选择课程", "error")
+            return redirect(url_for("admin_dashboard"))
+        category_ids = request.form.getlist("category_ids")
+        try:
+            datastore.set_course_categories(type_id, category_ids)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("课程分类已更新", "success")
+        return redirect(url_for("admin_dashboard"))
+
+    @app.post("/admin/category")
+    def admin_create_category() -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        name = request.form.get("name", "").strip()
+        try:
+            datastore.create_category(name)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("分类已创建", "success")
+        return redirect(url_for("admin_dashboard"))
+
+    @app.post("/admin/category/delete")
+    def admin_delete_category() -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        try:
+            category_id = int(request.form.get("category_id", "0"))
+        except (TypeError, ValueError):
+            flash("请选择要删除的分类", "error")
+            return redirect(url_for("admin_dashboard"))
+        if datastore.delete_category(category_id):
+            flash("分类已删除", "info")
+        else:
+            flash("未找到该分类", "error")
         return redirect(url_for("admin_dashboard"))
 
     @app.post("/admin/users/<int:user_id>/approve")

@@ -14,6 +14,50 @@
             <div class="value">{{ stats.total_users }}</div>
             <div class="label">用户总数</div>
         </div>
+        <div class="ui segment" style="margin-top: 1.5em;">
+            <h3 class="ui header">分类管理</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_category') }}">
+                <div class="fields">
+                    <div class="twelve wide field">
+                        <label>分类名称</label>
+                        <input type="text" name="name" placeholder="例如：2025 / 省选" required>
+                    </div>
+                    <div class="four wide field" style="display:flex;align-items:flex-end;">
+                        <button class="ui primary button" type="submit">新建分类</button>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            </form>
+            <div class="ui divider"></div>
+            {% if categories %}
+            <table class="ui celled table">
+                <thead>
+                    <tr>
+                        <th>分类名称</th>
+                        <th style="width: 7rem;">关联课程数</th>
+                        <th style="width: 7rem;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in categories %}
+                    <tr>
+                        <td>{{ category.name }}</td>
+                        <td>{{ category_usage.get(category.id, 0) }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('admin_delete_category') }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="category_id" value="{{ category.id }}">
+                                <button class="ui mini negative button" type="submit">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="ui message">暂无分类，请先创建。</div>
+            {% endif %}
+        </div>
     </div>
     <div class="column">
         <div class="ui statistic">
@@ -218,31 +262,81 @@
                         <input type="text" name="name" placeholder="例如：自定义训练营" required>
                     </div>
                     <div class="four wide field" style="display:flex;align-items:flex-end;">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="ui primary button" type="submit">新建课程</button>
                     </div>
                 </div>
+                <div class="field">
+                    <label>分类（可选，可多选）</label>
+                    {% if categories %}
+                    <div class="category-checkboxes" style="display:flex; flex-wrap: wrap; gap: 0.5em 1.25em;">
+                        {% for category in categories %}
+                        <div class="ui checkbox">
+                            <input type="checkbox" name="category_ids" value="{{ category.id }}" id="new-course-category-{{ category.id }}">
+                            <label for="new-course-category-{{ category.id }}">{{ category.name }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="ui message">暂无分类，可在分类管理中新增。</div>
+                    {% endif %}
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             </form>
             <div class="ui divider"></div>
-            <h4 class="ui header">自定义课程</h4>
-            {% if custom_courses %}
-            <div class="ui relaxed divided list">
-                {% for course in custom_courses %}
-                <div class="item" style="display:flex; justify-content: space-between; align-items: center;">
-                    <div class="content">
-                        <div class="header">{{ course.name }}</div>
-                        <div class="description">课程 ID：{{ course.id }}</div>
-                    </div>
-                    <form method="post" action="{{ url_for('admin_delete_course') }}" style="margin:0;">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="type_id" value="{{ course.id }}">
-                        <button class="ui mini negative button" type="submit">删除课程</button>
-                    </form>
-                </div>
-                {% endfor %}
-            </div>
+            <h4 class="ui header">课程列表</h4>
+            {% if types %}
+            <table class="ui celled table">
+                <thead>
+                    <tr>
+                        <th>课程</th>
+                        <th>分类配置</th>
+                        <th style="width: 8rem;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for course in types %}
+                    {% set selected_categories = course_category_map.get(course.id, []) %}
+                    <tr>
+                        <td>
+                            <div class="header">{{ course.name }}</div>
+                            <div class="description">课程 ID：{{ course.id }}</div>
+                        </td>
+                        <td>
+                            <form method="post" action="{{ url_for('admin_update_course_categories') }}" class="ui form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="type_id" value="{{ course.id }}">
+                                {% if categories %}
+                                <div class="category-checkboxes" style="display:flex; flex-wrap: wrap; gap: 0.5em 1.25em;">
+                                    {% for category in categories %}
+                                    <div class="ui checkbox">
+                                        <input type="checkbox" name="category_ids" value="{{ category.id }}" id="course-{{ course.id }}-category-{{ category.id }}" {% if category.id in selected_categories %}checked{% endif %}>
+                                        <label for="course-{{ course.id }}-category-{{ category.id }}">{{ category.name }}</label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <div class="ui message" style="margin:0;">暂无可用分类。</div>
+                                {% endif %}
+                                <button class="ui tiny primary button" type="submit" style="margin-top: 0.75em;" {% if not categories %}disabled{% endif %}>保存分类</button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if course.id in custom_course_ids %}
+                            <form method="post" action="{{ url_for('admin_delete_course') }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="type_id" value="{{ course.id }}">
+                                <button class="ui mini negative button" type="submit">删除课程</button>
+                            </form>
+                            {% else %}
+                            <span class="ui mini grey label">系统课程</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
             {% else %}
-            <div class="ui message">暂无自定义课程。</div>
+            <div class="ui message">暂无课程。</div>
             {% endif %}
         </div>
     </div>

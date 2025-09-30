@@ -22,9 +22,17 @@
         <div class="ui segment">
             <h3 class="ui header">统计</h3>
             <p><strong>总评分数：</strong> {{ stats.total_votes }}</p>
-            <p><strong>平均难度 Δ：</strong> {{ '%+.2f'|format(stats.avg_difficulty_delta) if stats.avg_difficulty_delta is not none else 'N/A' }}</p>
-            <p><strong>平均质量 Δ：</strong> {{ '%+.2f'|format(stats.avg_quality_delta) if stats.avg_quality_delta is not none else 'N/A' }}</p>
-            <p><strong>最近评分时间：</strong> {% if stats.last_vote %}<span class="time-display" data-timestamp="{{ stats.last_vote }}" data-format="relative"></span>{% else %}暂无{% endif %}</p>
+            <div class="ui two statistics" style="margin-top: 1em;">
+                <div class="statistic">
+                    <div class="value">{{ '%+.2f'|format(stats.avg_difficulty_delta) if stats.avg_difficulty_delta is not none else 'N/A' }}</div>
+                    <div class="label">平均难度 Δ</div>
+                </div>
+                <div class="statistic">
+                    <div class="value">{{ '%+.2f'|format(stats.avg_quality_delta) if stats.avg_quality_delta is not none else 'N/A' }}</div>
+                    <div class="label">平均质量 Δ</div>
+                </div>
+            </div>
+            <p style="margin-top: 1em;"><strong>最近评分时间：</strong> {% if stats.last_vote %}<span class="time-display" data-timestamp="{{ stats.last_vote }}" data-format="relative"></span>{% else %}暂无{% endif %}</p>
         </div>
     </div>
 </div>
