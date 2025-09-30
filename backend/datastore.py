@@ -603,13 +603,28 @@ class DataStore:
         return True
 
     def clear_votes_for_user(self, user_id: int) -> int:
+        votes = self.store.get("votes", [])
+        if not votes:
+            return 0
+        remaining_votes = []
+        removed_vote_ids: List[int] = []
         cleared = 0
-        for vote in self.store.get("votes", []):
-            if vote["user_id"] == user_id and not vote.get("deleted"):
+        for vote in votes:
+            if vote.get("user_id") != user_id:
+                remaining_votes.append(vote)
+                continue
+            vote_id = int(vote.get("id", 0) or 0)
+            removed_vote_ids.append(vote_id)
+            if not vote.get("deleted"):
                 self._adjust_problem_stats(vote["problem_id"], vote["difficulty"], vote["quality"], remove=True)
-                vote["deleted"] = True
                 cleared += 1
-        if cleared:
+        if not removed_vote_ids:
+            return 0
+        self.store["votes"] = remaining_votes
+        if removed_vote_ids:
+            reports = self.store.get("reports", [])
+            self.store["reports"] = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
+        if cleared or removed_vote_ids:
             self._save_store()
         return cleared
 
