@@ -4,18 +4,20 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="https://cdn.staticfile.org/font-awesome/4.7.0/css/font-awesome.css">
-<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css" rel="stylesheet">
-<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css" rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css"
+    rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css"
+    rel="stylesheet">
 {% endblock %}
 
 {% block content %}
 <h2 class="ui header">注册流程</h2>
 <div class="ui segment">
-    <p>欢迎各位 OIFC 联考学生参与本题目评分系统。为确保评分的公正与有效，我们需对您的身份进行审核。</p>
+    <p>欢迎您参与本题目评分系统。为确保评分的公正与有效，我们需对您的身份进行审核。</p>
     <p>您需提供洛谷 UID 以完成认证。我们承诺，在此过程中不会收集与认证无关的任何信息。</p>
     <p>管理员将根据您提交的洛谷 UID 及相关认证信息进行审核，通常无需等待过长时间。</p>
     <p>因技术原因，认证通过后可能不会第一时间通知您。</p>
-    <p>如您认为认证被遗漏或需申诉，请及时联系管理员（songhongyi, 10circle, henrytb, le0n, xcyle, myee）。</p>
+    <p>如您认为认证被遗漏或需申诉，请及时联系管理员（dscs2009）。</p>
     <p>请注意，管理员有权拒绝身份存疑、疑似小号或恶意注册的申请。如您提出申诉，管理组将与您进一步沟通。</p>
     <p>继续操作即表示您已阅读并同意上述内容，并同意注册本站账号。</p>
 </div>
@@ -34,7 +36,8 @@
     <div class="two fields">
         <div class="field">
             <label for="username">用户名</label>
-            <input required type="text" name="username" placeholder="您的用户名" value="{{ request.form.get('username','') }}">
+            <input required type="text" name="username" placeholder="您的用户名"
+                value="{{ request.form.get('username','') }}">
         </div>
         <div class="field">
             <label for="password">密码</label>
@@ -44,15 +47,18 @@
     <div class="three fields">
         <div class="field">
             <label for="luoguid">洛谷 UID</label>
-            <input required type="text" name="luoguid" placeholder="您的洛谷 UID" value="{{ request.form.get('luoguid','') }}">
+            <input required type="text" name="luoguid" placeholder="您的洛谷 UID"
+                value="{{ request.form.get('luoguid','') }}">
         </div>
         <div class="field">
             <label for="pasteid">剪贴板 ID</label>
-            <input required type="text" name="pasteid" placeholder="您的云剪贴板 ID" value="{{ request.form.get('pasteid','') }}">
+            <input required type="text" name="pasteid" placeholder="您的云剪贴板 ID"
+                value="{{ request.form.get('pasteid','') }}">
         </div>
         <div class="field">
             <label for="info">留言</label>
-            <input required type="text" name="info" placeholder="真实姓名 &amp; 学校" value="{{ request.form.get('info','') }}">
+            <input required type="text" name="info" placeholder="真实姓名 &amp; 学校"
+                value="{{ request.form.get('info','') }}">
         </div>
     </div>
     <div class="field">
