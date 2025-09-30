@@ -6,7 +6,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -603,29 +603,7 @@ class DataStore:
         return True
 
     def clear_votes_for_user(self, user_id: int) -> int:
-        votes = self.store.get("votes", [])
-        if not votes:
-            return 0
-        remaining_votes = []
-        removed_vote_ids: List[int] = []
-        cleared = 0
-        for vote in votes:
-            if vote.get("user_id") != user_id:
-                remaining_votes.append(vote)
-                continue
-            vote_id = int(vote.get("id", 0) or 0)
-            removed_vote_ids.append(vote_id)
-            if not vote.get("deleted"):
-                self._adjust_problem_stats(vote["problem_id"], vote["difficulty"], vote["quality"], remove=True)
-                cleared += 1
-        if not removed_vote_ids:
-            return 0
-        self.store["votes"] = remaining_votes
-        if removed_vote_ids:
-            reports = self.store.get("reports", [])
-            self.store["reports"] = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
-        if cleared or removed_vote_ids:
-            self._save_store()
+        cleared, _ = self._remove_votes_matching(lambda vote: vote.get("user_id") == user_id)
         return cleared
 
     # Vote operations ---------------------------------------------------
@@ -725,6 +703,34 @@ class DataStore:
             problem["sd_quality"] = sd
             problem["cnt2"] = count
 
+    def _remove_votes_matching(self, predicate: Callable[[Dict[str, Any]], bool]) -> Tuple[int, List[int]]:
+        votes = self.store.get("votes", [])
+        if not votes:
+            return 0, []
+        remaining_votes: List[Dict[str, Any]] = []
+        removed_vote_ids: List[int] = []
+        cleared = 0
+        for vote in votes:
+            if not predicate(vote):
+                remaining_votes.append(vote)
+                continue
+            try:
+                vote_id = int(vote.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                vote_id = 0
+            removed_vote_ids.append(vote_id)
+            if not vote.get("deleted"):
+                self._adjust_problem_stats(vote.get("problem_id"), vote.get("difficulty"), vote.get("quality"), remove=True)
+                cleared += 1
+        if not removed_vote_ids:
+            return cleared, removed_vote_ids
+        self.store["votes"] = remaining_votes
+        reports = self.store.get("reports", [])
+        if reports:
+            self.store["reports"] = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
+        self._save_store()
+        return cleared, removed_vote_ids
+
     def list_votes_for_problem(self, problem_id: int) -> List[Dict[str, Any]]:
         votes = []
         for vote in self.store.get("votes", []):
@@ -733,28 +739,18 @@ class DataStore:
         return votes
 
     def mark_vote_deleted(self, vote_id: int) -> bool:
-        for vote in self.store.get("votes", []):
-            if vote["id"] == vote_id:
-                vote["deleted"] = True
-                self._save_store()
-                return True
-        return False
+        cleared, removed_ids = self._remove_votes_matching(lambda vote: vote.get("id") == vote_id)
+        return bool(removed_ids or cleared)
 
     def mark_votes_deleted_bulk(self, vote_ids: List[int]) -> int:
         try:
             target_ids = {int(vote_id) for vote_id in vote_ids}
         except (TypeError, ValueError):
             target_ids = set()
-        updated = 0
         if not target_ids:
             return 0
-        for vote in self.store.get("votes", []):
-            if vote["id"] in target_ids and not vote.get("deleted"):
-                vote["deleted"] = True
-                updated += 1
-        if updated:
-            self._save_store()
-        return updated
+        cleared, _ = self._remove_votes_matching(lambda vote: vote.get("id") in target_ids)
+        return cleared
 
     def report_vote(self, vote_id: int, user_id: int) -> None:
         self.store["reports"].append({
