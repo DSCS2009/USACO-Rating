@@ -96,6 +96,7 @@ class DataStore:
         self.custom_types: Dict[int, Dict[str, Any]] = {}
         self.course_categories: Dict[int, Dict[str, Any]] = {}
         self.type_categories: Dict[int, List[int]] = {}
+        self._store_mtime: float = 0.0
         self._load_store()
         self._bootstrap_announcements()
 
@@ -130,6 +131,8 @@ class DataStore:
 
     def _load_store(self) -> None:
         self.store = self._load_json_file(STORE_PATH, DEFAULT_STORE_PAYLOAD)
+        self.course_categories.clear()
+        self.type_categories.clear()
         self.store.setdefault("announcements", [])
         self.store.setdefault("reports", [])
         self.store.setdefault("problem_overrides", {})
@@ -144,6 +147,16 @@ class DataStore:
         self.store.setdefault("next_contest_id", 1)
         self.store.setdefault("next_category_id", 1)
         self._load_custom_types_from_store()
+
+        # Ensure custom problems are reloaded from disk without duplicating previous entries.
+        existing_custom_ids = [pid for pid, problem in self.problem_map.items() if problem.get("is_custom")]
+        for pid in existing_custom_ids:
+            problem = self.problem_map.pop(pid, None)
+            if not problem:
+                continue
+            bucket = self.problems_by_type.get(problem.get("type"))
+            if bucket:
+                bucket["problems"] = [item for item in bucket.get("problems", []) if item.get("id") != pid]
 
         votes = self.store.setdefault("votes", [])
         users = self.store.setdefault("users", [])
@@ -285,10 +298,15 @@ class DataStore:
             if problem:
                 problem.update(override)
         self._rebuild_problem_stats()
+        self._store_mtime = self._store_file_mtime()
 
     def _load_custom_types_from_store(self) -> None:
-        existing_type_ids = list(self.types.keys())
+        previous_custom_ids = set(getattr(self, "custom_types", {}).keys())
+        for type_id in previous_custom_ids:
+            self.types.pop(type_id, None)
+            self.problems_by_type.pop(type_id, None)
         self.custom_types = {}
+        existing_type_ids = list(self.types.keys())
         raw_custom_types = self.store.setdefault("custom_types", []) or []
         normalised_custom_types: List[Dict[str, Any]] = []
         for raw_type in raw_custom_types:
@@ -431,6 +449,19 @@ class DataStore:
 
     def _save_store(self) -> None:
         STORE_PATH.write_text(json.dumps(self.store, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._store_mtime = self._store_file_mtime()
+
+    def _store_file_mtime(self) -> float:
+        try:
+            return STORE_PATH.stat().st_mtime
+        except FileNotFoundError:
+            return 0.0
+
+    def _ensure_store_fresh(self) -> None:
+        current_mtime = self._store_file_mtime()
+        if current_mtime and current_mtime > getattr(self, "_store_mtime", 0.0):
+            # Re-load store data when another process updates the backing file.
+            self._load_store()
 
     def _normalise_course_id(self, value: Any) -> Optional[int]:
         if value is None or value == "":
@@ -452,9 +483,11 @@ class DataStore:
     # Utility accessors -------------------------------------------------
 
     def list_types(self) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         return sorted(self.types.values(), key=lambda item: item["id"])
 
     def list_type_groups(self) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         groups = [{"label": group["label"], "entries": list(group["entries"])} for group in self.type_groups]
         if self.course_categories:
             for category_id in sorted(self.course_categories):
@@ -474,17 +507,21 @@ class DataStore:
         return groups
 
     def list_course_contests(self, type_id: int) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         contests = self.store.get("course_contests", {}).get(str(type_id), [])
         return list(contests)
 
     def get_first_course_id(self) -> Optional[int]:
+        self._ensure_store_fresh()
         return min(self.types.keys()) if self.types else None
 
     def get_global_default_course_id(self) -> Optional[int]:
+        self._ensure_store_fresh()
         default_id = self._normalise_course_id(self.store.get("global_default_course_id"))
         return default_id
 
     def set_global_default_course(self, course_id: Optional[int]) -> None:
+        self._ensure_store_fresh()
         if course_id is None:
             self.store["global_default_course_id"] = None
             self._save_store()
@@ -496,6 +533,7 @@ class DataStore:
         self._save_store()
 
     def resolve_start_course_id(self, user: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        self._ensure_store_fresh()
         if user:
             preferred = self._normalise_course_id(user.get("default_course_id"))
             if preferred is not None:
@@ -506,12 +544,15 @@ class DataStore:
         return self.get_first_course_id()
 
     def list_categories(self) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         return sorted(self.course_categories.values(), key=lambda item: item["id"])
 
     def get_categories_for_course(self, type_id: int) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         return [self.course_categories[cid] for cid in self.type_categories.get(type_id, []) if cid in self.course_categories]
 
     def get_category_ids_for_course(self, type_id: int) -> List[int]:
+        self._ensure_store_fresh()
         return list(self.type_categories.get(type_id, []))
 
     def _normalise_category_ids(self, category_ids: Optional[Iterable[Any]]) -> List[int]:
