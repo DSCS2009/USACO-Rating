@@ -143,6 +143,8 @@ class DataStore:
         self.store.setdefault("next_vote_id", 1)
         self.store.setdefault("next_contest_id", 1)
         self.store.setdefault("next_category_id", 1)
+        self._load_custom_types_from_store()
+
         votes = self.store.setdefault("votes", [])
         users = self.store.setdefault("users", [])
         for user in users:
@@ -203,25 +205,6 @@ class DataStore:
             self.store["global_default_course_id"] = self._normalise_course_id(raw_global_default)
         if self.store["next_problem_id"] < self.next_problem_id:
             self.store["next_problem_id"] = self.next_problem_id
-
-        existing_type_ids = list(self.types.keys())
-        self.custom_types = {}
-        normalised_custom_types = []
-        for raw_type in self.store.get("custom_types", []):
-            type_id = int(raw_type.get("id", 0) or 0)
-            name = str(raw_type.get("name", "")).strip()
-            if not type_id or not name:
-                continue
-            entry = {"id": type_id, "name": name}
-            normalised_custom_types.append(entry)
-            self.types[type_id] = entry
-            self.custom_types[type_id] = entry
-            self.problems_by_type.setdefault(type_id, {"type": entry, "problems": []})
-            existing_type_ids.append(type_id)
-        self.store["custom_types"] = normalised_custom_types
-        proposed_next_type = max(existing_type_ids or [0]) + 1
-        if self.store.get("next_type_id", 0) < proposed_next_type:
-            self.store["next_type_id"] = proposed_next_type
 
         # Load category information --------------------------------------
         normalised_categories: List[Dict[str, Any]] = []
@@ -302,6 +285,33 @@ class DataStore:
             if problem:
                 problem.update(override)
         self._rebuild_problem_stats()
+
+    def _load_custom_types_from_store(self) -> None:
+        existing_type_ids = list(self.types.keys())
+        self.custom_types = {}
+        raw_custom_types = self.store.setdefault("custom_types", []) or []
+        normalised_custom_types: List[Dict[str, Any]] = []
+        for raw_type in raw_custom_types:
+            try:
+                type_id = int(raw_type.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            name = str(raw_type.get("name", "")).strip()
+            if not type_id or not name:
+                continue
+            entry = {"id": type_id, "name": name}
+            normalised_custom_types.append(entry)
+            self.types[type_id] = entry
+            self.custom_types[type_id] = entry
+            self.problems_by_type.setdefault(
+                type_id,
+                {"type": entry, "problems": []},
+            )
+            existing_type_ids.append(type_id)
+        self.store["custom_types"] = normalised_custom_types
+        proposed_next_type = max(existing_type_ids or [0]) + 1
+        if self.store.get("next_type_id", 0) < proposed_next_type:
+            self.store["next_type_id"] = proposed_next_type
 
     def _bootstrap_announcements(self) -> None:
         if self.store["announcements"]:
