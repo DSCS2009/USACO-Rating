@@ -7,7 +7,7 @@ import time
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -23,6 +23,7 @@ DEFAULT_PROBLEMS_PAYLOAD: Dict[str, Any] = {}
 DEFAULT_STORE_PAYLOAD: Dict[str, Any] = {
     "announcements": [],
     "reports": [],
+    "next_report_id": 1,
     "problem_overrides": {},
     "custom_problems": [],
     "custom_types": [],
@@ -146,6 +147,7 @@ class DataStore:
         self.store.setdefault("next_vote_id", 1)
         self.store.setdefault("next_contest_id", 1)
         self.store.setdefault("next_category_id", 1)
+        self.store.setdefault("next_report_id", 1)
         self._load_custom_types_from_store()
 
         # Ensure custom problems are reloaded from disk without duplicating previous entries.
@@ -185,6 +187,7 @@ class DataStore:
                     normalised_perms.append(perm_str)
             user["tag_permissions"] = normalised_perms
         # Normalise votes to include new metrics
+        vote_owner_map: Dict[int, Optional[int]] = {}
         for vote in votes:
             thinking = vote.get("thinking")
             implementation = vote.get("implementation")
@@ -211,6 +214,75 @@ class DataStore:
             vote.setdefault("score", 0)
             vote.setdefault("created_at", vote.get("created_at", _now_ts()))
             vote.setdefault("updated_at", vote.get("updated_at", vote["created_at"]))
+            try:
+                vid = int(vote.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if vid <= 0:
+                continue
+            vote_owner_map[vid] = vote.get("user_id")
+
+        reports = self.store.setdefault("reports", [])
+        next_report_id = max(1, int(self.store.get("next_report_id", 1) or 1))
+        seen_report_ids: Set[int] = set()
+        seen_pairs: Set[Tuple[int, int]] = set()
+        normalised_reports: List[Dict[str, Any]] = []
+        for raw_report in reports:
+            report = dict(raw_report)
+            try:
+                rid_val = int(report.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                rid_val = 0
+            if rid_val <= 0 or rid_val in seen_report_ids:
+                rid_val = next_report_id
+                next_report_id += 1
+            report["id"] = rid_val
+            seen_report_ids.add(rid_val)
+
+            reporter_raw = report.get("user_id", report.get("reporter_id"))
+            reporter_id = None
+            if reporter_raw is not None:
+                try:
+                    reporter_id = int(reporter_raw)
+                except (TypeError, ValueError):
+                    reporter_id = None
+            if reporter_id is not None and reporter_id <= 0:
+                reporter_id = None
+            report["user_id"] = reporter_id
+            report["reporter_id"] = reporter_id
+
+            try:
+                vote_id = int(report.get("vote_id", 0) or 0)
+            except (TypeError, ValueError):
+                vote_id = 0
+            report["vote_id"] = vote_id
+
+            if report.get("target_user_id") is None and vote_id in vote_owner_map:
+                report["target_user_id"] = vote_owner_map[vote_id]
+            if report.get("target_user_id") is not None:
+                try:
+                    report["target_user_id"] = int(report.get("target_user_id") or 0) or None
+                except (TypeError, ValueError):
+                    report["target_user_id"] = None
+
+            report.setdefault("created_at", _now_ts())
+
+            if reporter_id is not None and vote_id:
+                pair = (vote_id, reporter_id)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+
+            normalised_reports.append(report)
+
+        if normalised_reports != reports:
+            self.store["reports"] = normalised_reports
+
+        max_report_id = max(seen_report_ids) if seen_report_ids else 0
+        if next_report_id <= max_report_id:
+            next_report_id = max_report_id + 1
+        self.store["next_report_id"] = max(self.store.get("next_report_id", 1), next_report_id)
+
         raw_global_default = self.store.get("global_default_course_id")
         if raw_global_default is None and "global_default_course_id" not in self.store:
             self.store["global_default_course_id"] = None
@@ -1101,6 +1173,19 @@ class DataStore:
                 votes.append(dict(vote))
         return votes
 
+    def find_vote_by_id(self, vote_id: int) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
+        try:
+            target_id = int(vote_id)
+        except (TypeError, ValueError):
+            return None
+        if target_id <= 0:
+            return None
+        for vote in self.store.get("votes", []):
+            if vote.get("id") == target_id:
+                return dict(vote)
+        return None
+
     def mark_vote_deleted(self, vote_id: int) -> bool:
         cleared, removed_ids = self._remove_votes_matching(lambda vote: vote.get("id") == vote_id)
         return bool(removed_ids or cleared)
@@ -1115,13 +1200,75 @@ class DataStore:
         cleared, _ = self._remove_votes_matching(lambda vote: vote.get("id") in target_ids)
         return cleared
 
-    def report_vote(self, vote_id: int, user_id: int) -> None:
-        self.store["reports"].append({
-            "vote_id": vote_id,
-            "user_id": user_id,
+    def report_vote(self, vote_id: int, user_id: int) -> Tuple[bool, Optional[str]]:
+        self._ensure_store_fresh()
+        try:
+            vote_id_int = int(vote_id)
+            reporter_id = int(user_id)
+        except (TypeError, ValueError):
+            return False, "Invalid vote"
+        if vote_id_int <= 0 or reporter_id <= 0:
+            return False, "Invalid vote"
+        vote = None
+        for entry in self.store.get("votes", []):
+            if entry.get("id") == vote_id_int:
+                vote = entry
+                break
+        if not vote or vote.get("deleted"):
+            return False, "Vote not found"
+        for report in self.store.get("reports", []):
+            if report.get("vote_id") == vote_id_int and report.get("user_id") == reporter_id:
+                return False, "Already reported"
+        report_id = max(1, int(self.store.get("next_report_id", 1) or 1))
+        self.store["next_report_id"] = report_id + 1
+        target_user_id = None
+        try:
+            target_user_id = int(vote.get("user_id") or 0) or None
+        except (TypeError, ValueError):
+            target_user_id = None
+        self.store.setdefault("reports", []).append({
+            "id": report_id,
+            "vote_id": vote_id_int,
+            "user_id": reporter_id,
+            "reporter_id": reporter_id,
+            "target_user_id": target_user_id,
             "created_at": _now_ts(),
         })
         self._save_store()
+        return True, None
+
+    def list_reports(self) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
+        return [dict(report) for report in self.store.get("reports", [])]
+
+    def get_report(self, report_id: int) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
+        try:
+            rid = int(report_id)
+        except (TypeError, ValueError):
+            return None
+        if rid <= 0:
+            return None
+        for report in self.store.get("reports", []):
+            if report.get("id") == rid:
+                return dict(report)
+        return None
+
+    def remove_report(self, report_id: int) -> bool:
+        self._ensure_store_fresh()
+        try:
+            rid = int(report_id)
+        except (TypeError, ValueError):
+            return False
+        if rid <= 0:
+            return False
+        reports = self.store.get("reports", [])
+        before = len(reports)
+        self.store["reports"] = [report for report in reports if report.get("id") != rid]
+        if len(self.store["reports"]) != before:
+            self._save_store()
+            return True
+        return False
 
     # Problem mutations -------------------------------------------------
 

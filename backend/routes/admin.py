@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from flask import abort, flash, g, redirect, render_template, request, session, url_for
 
@@ -20,6 +20,13 @@ def register_admin_routes(app) -> None:
         course = datastore.types.get(default_id) if default_id is not None else None
         course_name = course.get("name") if course else None
         return default_id, course_name
+
+    def _load_report(report_id: int) -> Optional[Dict[str, Any]]:
+        report = datastore.get_report(report_id)
+        if not report:
+            flash("举报不存在或已处理", "error")
+            return None
+        return report
 
     @app.route("/admin")
     def admin_dashboard() -> Any:
@@ -46,6 +53,128 @@ def register_admin_routes(app) -> None:
             global_default_course_name=default_name,
             admin_active="overview",
         )
+
+    @app.route("/admin/reports")
+    def admin_reports() -> Any:
+        require_admin()
+        raw_reports = datastore.list_reports()
+        entries = []
+        for report in sorted(raw_reports, key=lambda item: item.get("created_at", 0), reverse=True):
+            vote = datastore.find_vote_by_id(report.get("vote_id")) if report.get("vote_id") else None
+            reporter = datastore.find_user_by_id(report.get("user_id")) if report.get("user_id") else None
+            target_user_id = report.get("target_user_id")
+            if not target_user_id and vote:
+                target_user_id = vote.get("user_id")
+            target = datastore.find_user_by_id(target_user_id) if target_user_id else None
+            problem = datastore.get_problem(vote.get("problem_id")) if vote else None
+            entries.append({
+                "report": report,
+                "vote": vote,
+                "reporter": reporter,
+                "target": target,
+                "problem": problem,
+            })
+        default_id, default_name = _global_default_info()
+        return render_template(
+            "admin/reports.html",
+            reports=entries,
+            pending_count=len(entries),
+            admin_active="reports",
+            global_default_course_id=default_id,
+            global_default_course_name=default_name,
+        )
+
+    @app.post("/admin/reports/<int:report_id>/ignore")
+    def admin_ignore_report(report_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        report = _load_report(report_id)
+        if report:
+            datastore.remove_report(report_id)
+            flash("已忽略该举报", "info")
+        return redirect(url_for("admin_reports"))
+
+    @app.post("/admin/reports/<int:report_id>/ban-reporter")
+    def admin_ban_report_reporter(report_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        report = _load_report(report_id)
+        if not report:
+            return redirect(url_for("admin_reports"))
+        reporter_id = report.get("user_id")
+        try:
+            reporter_id = int(reporter_id) if reporter_id is not None else None
+        except (TypeError, ValueError):
+            reporter_id = None
+        if not reporter_id:
+            datastore.remove_report(report_id)
+            flash("举报人信息缺失，已忽略该举报", "warning")
+            return redirect(url_for("admin_reports"))
+        if datastore.set_banned(reporter_id, True):
+            flash("举报人账户已封禁", "warning")
+        else:
+            flash("封禁失败，未找到举报人账户", "error")
+        datastore.remove_report(report_id)
+        return redirect(url_for("admin_reports"))
+
+    @app.post("/admin/reports/<int:report_id>/ban-target")
+    def admin_ban_report_target(report_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        report = _load_report(report_id)
+        if not report:
+            return redirect(url_for("admin_reports"))
+        target_user_id = report.get("target_user_id")
+        try:
+            target_user_id = int(target_user_id) if target_user_id is not None else None
+        except (TypeError, ValueError):
+            target_user_id = None
+        if not target_user_id and report.get("vote_id"):
+            vote = datastore.find_vote_by_id(report.get("vote_id"))
+            if vote:
+                target_user_id = vote.get("user_id")
+        if target_user_id:
+            try:
+                target_user_id = int(target_user_id)
+            except (TypeError, ValueError):
+                target_user_id = None
+        if not target_user_id:
+            datastore.remove_report(report_id)
+            flash("未找到被举报账户信息，已忽略该举报", "warning")
+            return redirect(url_for("admin_reports"))
+        if datastore.set_banned(target_user_id, True):
+            flash("被举报账户已封禁", "warning")
+        else:
+            flash("封禁失败，未找到被举报账户", "error")
+        datastore.remove_report(report_id)
+        return redirect(url_for("admin_reports"))
+
+    @app.post("/admin/reports/<int:report_id>/delete-vote")
+    def admin_delete_report_vote(report_id: int) -> Any:
+        require_admin()
+        if not validate_csrf(request.form.get("csrf_token")):
+            abort(400, description="Invalid CSRF token")
+        report = _load_report(report_id)
+        if not report:
+            return redirect(url_for("admin_reports"))
+        try:
+            vote_id = int(report.get("vote_id") or 0)
+        except (TypeError, ValueError):
+            vote_id = 0
+        if vote_id <= 0:
+            datastore.remove_report(report_id)
+            flash("举报缺少有效的评分，已忽略", "warning")
+            return redirect(url_for("admin_reports"))
+        removed = datastore.mark_vote_deleted(vote_id)
+        if removed:
+            flash("评分已删除", "success")
+        else:
+            flash("评分不存在或已删除", "warning")
+        datastore.remove_report(report_id)
+        return redirect(url_for("admin_reports"))
 
     @app.route("/admin/users")
     def admin_users() -> Any:

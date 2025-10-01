@@ -235,7 +235,9 @@ def register_api_routes(app) -> None:
             vote_id = int(request.form.get("vid", 0))
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid vote"})
-        datastore.report_vote(vote_id, user["id"])
+        success, error_message = datastore.report_vote(vote_id, user["id"])
+        if not success:
+            return jsonify({"error": error_message or "Unable to report"})
         return jsonify({"success": True})
 
     @app.get("/api/votes")

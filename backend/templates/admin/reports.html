@@ -1,0 +1,116 @@
+{% extends 'admin/layout.html' %}
+
+{% block admin_content %}
+<h2 class="ui header">举报管理</h2>
+<p>查看并处理用户针对评分的举报。管理员可以封禁账户、删除评分或直接忽略举报。</p>
+{% if pending_count %}
+<div class="ui yellow label" style="margin-bottom:1rem;">待处理 {{ pending_count }} 条</div>
+{% endif %}
+
+{% if reports %}
+<table class="ui celled table">
+    <thead>
+        <tr>
+            <th style="width:5rem;">编号</th>
+            <th style="width:9rem;">时间</th>
+            <th>评分详情</th>
+            <th style="width:12rem;">举报人</th>
+            <th style="width:12rem;">被举报人</th>
+            <th style="width:12rem;">操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in reports %}
+        {% set report = entry.report %}
+        {% set vote = entry.vote %}
+        {% set reporter = entry.reporter %}
+        {% set target = entry.target %}
+        {% set problem = entry.problem %}
+        <tr>
+            <td>{{ report.id }}</td>
+            <td><span class="time-display" data-timestamp="{{ report.created_at }}"></span></td>
+            <td>
+                {% if vote %}
+                    <div>
+                        {% if problem %}
+                            <a href="{{ url_for('problem_detail', problem_id=problem.id) }}" target="_blank">{{ problem.title }}</a>
+                        {% else %}
+                            题目 #{{ vote.problem_id }}
+                        {% endif %}
+                    </div>
+                    <div class="meta" style="margin-top:0.35rem;">
+                        综合 {{ '%.0f'|format(vote.overall or vote.difficulty or 0) }} |
+                        思维 {{ '%.0f'|format(vote.thinking or 0) }} |
+                        实现 {{ '%.0f'|format(vote.implementation or 0) }}
+                        {% if vote.quality is not none %}|
+                        质量 {{ '%.2f'|format(vote.quality) }}{% endif %}
+                    </div>
+                    {% if vote.comment %}
+                    <div class="ui tiny message" style="margin-top:0.5rem;">{{ vote.comment }}</div>
+                    {% endif %}
+                {% else %}
+                    <span class="ui grey label">评分不存在或已删除</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if reporter %}
+                    <div><strong>{{ reporter.username }}</strong> (ID {{ reporter.id }})</div>
+                    <div class="meta">
+                        {% if reporter.banned %}
+                            <span class="ui red label mini">已封禁</span>
+                        {% else %}
+                            <span class="ui green label mini">正常</span>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <span class="ui grey label">未知用户</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if target %}
+                    <div><strong>{{ target.username }}</strong> (ID {{ target.id }})</div>
+                    <div class="meta">
+                        {% if target.banned %}
+                            <span class="ui red label mini">已封禁</span>
+                        {% else %}
+                            <span class="ui green label mini">正常</span>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <span class="ui grey label">未知用户</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="ui vertical tiny buttons">
+                    <form method="post" action="{{ url_for('admin_ban_report_target', report_id=report.id) }}" style="margin-bottom:0.35rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini negative button" type="submit" {% if not target %}disabled{% endif %}>封禁被举报人</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin_ban_report_reporter', report_id=report.id) }}" style="margin-bottom:0.35rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini orange button" type="submit" {% if not reporter %}disabled{% endif %}>封禁举报人</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin_delete_report_vote', report_id=report.id) }}" style="margin-bottom:0.35rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini primary button" type="submit" {% if not vote %}disabled{% endif %}>删除评分</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin_ignore_report', report_id=report.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini basic button" type="submit">忽略</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="ui placeholder segment">
+    <div class="ui icon header">
+        <i class="shield alternate icon"></i>
+        暂无待处理的举报
+    </div>
+    <p>所有举报均已处理完毕。</p>
+</div>
+{% endif %}
+{% endblock %}

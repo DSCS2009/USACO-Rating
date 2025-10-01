@@ -7,6 +7,7 @@
         <div class="ui segment">
             <div class="ui secondary vertical pointing menu">
                 <a class="item{% if admin_active == 'overview' %} active{% endif %}" href="{{ url_for('admin_overview') }}">概览</a>
+                <a class="item{% if admin_active == 'reports' %} active{% endif %}" href="{{ url_for('admin_reports') }}">举报管理</a>
                 <a class="item{% if admin_active == 'users' %} active{% endif %}" href="{{ url_for('admin_users') }}">用户管理</a>
                 <a class="item{% if admin_active == 'courses' %} active{% endif %}" href="{{ url_for('admin_courses') }}">课程与内容</a>
             </div>
