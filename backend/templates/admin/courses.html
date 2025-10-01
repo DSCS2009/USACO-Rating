@@ -1,0 +1,304 @@
+{% extends 'admin/layout.html' %}
+
+{% block admin_content %}
+<h2 class="ui header">课程与内容管理</h2>
+<p>维护课程结构、分类以及比赛信息，并可直接新增题目内容。</p>
+
+<div class="ui stackable grid">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">创建分类</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_category') }}">
+                <div class="field">
+                    <label>分类名称</label>
+                    <input type="text" name="name" placeholder="例如：2025 / 省选" required>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">新增分类</button>
+            </form>
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">分类列表</h3>
+            {% if categories %}
+            <table class="ui celled table">
+                <thead>
+                    <tr>
+                        <th>分类</th>
+                        <th style="width:8rem;">关联课程数</th>
+                        <th style="width:6rem;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in categories %}
+                    <tr>
+                        <td>{{ category.name }}</td>
+                        <td>{{ category_usage.get(category.id, 0) }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('admin_delete_category') }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="category_id" value="{{ category.id }}">
+                                <button class="ui mini negative button" type="submit">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="ui message">暂无分类，请先创建。</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="ui stackable grid" style="margin-top:2em;">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">新建课程</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_course') }}">
+                <div class="field">
+                    <label>课程名称</label>
+                    <input type="text" name="name" placeholder="例如：自定义训练营" required>
+                </div>
+                <div class="field">
+                    <label>关联分类（可选，多选）</label>
+                    {% if categories %}
+                    <div class="category-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.5em 1em;">
+                        {% for category in categories %}
+                        <div class="ui checkbox">
+                            <input type="checkbox" name="category_ids" value="{{ category.id }}" id="new-course-category-{{ category.id }}">
+                            <label for="new-course-category-{{ category.id }}">{{ category.name }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="ui message">暂无分类，可稍后再配置。</div>
+                    {% endif %}
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">创建课程</button>
+            </form>
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">课程列表</h3>
+            {% if types %}
+            <table class="ui celled table">
+                <thead>
+                    <tr>
+                        <th>课程</th>
+                        <th>分类配置</th>
+                        <th style="width:8rem;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for course in types %}
+                    {% set selected_categories = course_category_map.get(course.id, []) %}
+                    <tr {% if global_default_course_id == course.id %}class="positive"{% endif %}>
+                        <td>
+                            <div class="header">{{ course.name }}</div>
+                            <div class="description">ID：{{ course.id }}{% if global_default_course_id == course.id %} · 全局默认{% endif %}</div>
+                        </td>
+                        <td>
+                            <form method="post" action="{{ url_for('admin_update_course_categories') }}" class="ui form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="type_id" value="{{ course.id }}">
+                                {% if categories %}
+                                <div class="category-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.5em 1em;">
+                                    {% for category in categories %}
+                                    <div class="ui checkbox">
+                                        <input type="checkbox" name="category_ids" value="{{ category.id }}" id="course-{{ course.id }}-category-{{ category.id }}" {% if category.id in selected_categories %}checked{% endif %}>
+                                        <label for="course-{{ course.id }}-category-{{ category.id }}">{{ category.name }}</label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <div class="ui message" style="margin:0;">暂无可用分类。</div>
+                                {% endif %}
+                                <button class="ui tiny primary button" type="submit" style="margin-top:0.75em;" {% if not categories %}disabled{% endif %}>保存</button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if course.id in custom_course_ids %}
+                            <form method="post" action="{{ url_for('admin_delete_course') }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="type_id" value="{{ course.id }}">
+                                <button class="ui mini negative button" type="submit">删除</button>
+                            </form>
+                            {% else %}
+                            <span class="ui mini grey label">系统课程</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="ui message">暂无课程。</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="ui stackable grid" style="margin-top:2em;">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">添加比赛</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_create_contest') }}">
+                <div class="two fields">
+                    <div class="field">
+                        <label>课程</label>
+                        <select name="type_id" id="contestCourseSelect" required>
+                            {% for course in types %}
+                            <option value="{{ course.id }}">{{ course.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>比赛名称</label>
+                        <input type="text" name="name" id="contestInput" list="contestOptions" placeholder="例如：周赛 1" required>
+                        <datalist id="contestOptions"></datalist>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">创建比赛</button>
+            </form>
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">删除比赛</h3>
+            <form class="ui form" method="post" action="{{ url_for('admin_delete_contest') }}">
+                <div class="two fields">
+                    <div class="field">
+                        <label>课程</label>
+                        <select name="type_id" id="deleteContestCourseSelect" required>
+                            {% for course in types %}
+                            <option value="{{ course.id }}">{{ course.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>比赛</label>
+                        <select name="contest_id" id="contestOptionsForDelete" required>
+                            <option value="">请选择课程</option>
+                        </select>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui red button" type="submit">删除比赛</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="ui segment" style="margin-top:2em;">
+    <h3 class="ui header">新增题目</h3>
+    <form class="ui form" method="post" action="{{ url_for('create_problem') }}">
+        <div class="field">
+            <label>课程</label>
+            <select name="type_id" required>
+                {% for course in types %}
+                <option value="{{ course.id }}">{{ course.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label>比赛</label>
+            <input type="text" name="contest" list="contestOptions" placeholder="支持选择已有比赛或输入新名称" required>
+        </div>
+        <div class="field">
+            <label>题目名称</label>
+            <input type="text" name="title" required>
+        </div>
+        <div class="field">
+            <label>链接</label>
+            <input type="url" name="url">
+        </div>
+        <div class="field">
+            <label>描述</label>
+            <textarea name="description" rows="3"></textarea>
+        </div>
+        <div class="two fields">
+            <div class="field">
+                <label>出题人 (JSON 数组)</label>
+                <input type="text" name="setter_json" placeholder='[{"name": "Alice"}]'>
+            </div>
+            <div class="field">
+                <label>来源 (JSON 数组)</label>
+                <input type="text" name="source_json" placeholder='[{"name": "NOI"}]'>
+            </div>
+        </div>
+        <div class="field">
+            <label>Meta (JSON)</label>
+            <textarea name="meta_json" rows="3" placeholder='{"stats": {"ac_count": 0, "submit_count": 0}}'></textarea>
+        </div>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ui primary button" type="submit">添加题目</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    $('.ui.dropdown').dropdown();
+    $('.category-checkboxes .ui.checkbox').checkbox();
+
+    const courseContestMap = {{ course_contests|tojson }};
+
+    const contestDatalist = document.getElementById('contestOptions');
+    function getContests(courseId) {
+        return courseContestMap[String(courseId)] || [];
+    }
+    function refreshContestDatalist(courseId) {
+        if (!contestDatalist) { return; }
+        contestDatalist.innerHTML = '';
+        getContests(courseId).forEach(contest => {
+            const option = document.createElement('option');
+            option.value = contest.name;
+            contestDatalist.appendChild(option);
+        });
+    }
+
+    const addContestSelect = document.getElementById('contestCourseSelect');
+    if (addContestSelect) {
+        refreshContestDatalist(addContestSelect.value);
+        addContestSelect.addEventListener('change', event => {
+            refreshContestDatalist(event.target.value);
+        });
+    }
+
+    const deleteCourseSelect = document.getElementById('deleteContestCourseSelect');
+    const contestDeleteSelect = document.getElementById('contestOptionsForDelete');
+    function refreshContestDeleteOptions(courseId) {
+        if (!contestDeleteSelect) { return; }
+        const contests = getContests(courseId);
+        contestDeleteSelect.innerHTML = '';
+        if (!contests.length) {
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '该课程暂无比赛';
+            contestDeleteSelect.appendChild(placeholder);
+            contestDeleteSelect.disabled = true;
+            return;
+        }
+        contestDeleteSelect.disabled = false;
+        contests.forEach(contest => {
+            const option = document.createElement('option');
+            option.value = contest.id;
+            option.textContent = contest.name;
+            contestDeleteSelect.appendChild(option);
+        });
+    }
+    if (deleteCourseSelect) {
+        refreshContestDeleteOptions(deleteCourseSelect.value);
+        deleteCourseSelect.addEventListener('change', event => {
+            refreshContestDeleteOptions(event.target.value);
+        });
+    }
+</script>
+{% endblock %}

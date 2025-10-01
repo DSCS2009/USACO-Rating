@@ -1,0 +1,215 @@
+{% extends 'admin/layout.html' %}
+
+{% block extra_head %}
+<link href="https://cdn.datatables.net/2.0.2/css/dataTables.semanticui.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block admin_content %}
+<h2 class="ui header">用户管理</h2>
+<p>审批注册、调整权限，并为用户配置个性化默认课程。若未设置个人默认课程，用户登录时会自动使用全局默认课程。</p>
+
+{% if pending_users %}
+<div class="ui segment">
+    <h3 class="ui header">待审核注册</h3>
+    <table class="ui celled table" id="pendingTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>用户名</th>
+                <th>洛谷 UID</th>
+                <th>备注</th>
+                <th>注册时间</th>
+                <th style="width:9rem;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in pending_users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>{{ user.username }}</td>
+                <td>{{ user.luoguid or '-' }}</td>
+                <td>{{ user.info or '' }}</td>
+                <td><span class="time-display" data-timestamp="{{ user.created_at }}"></span></td>
+                <td>
+                    <form method="post" action="{{ url_for('admin_approve_user', user_id=user.id) }}" style="display:inline-block;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini positive button" type="submit">通过</button>
+                    </form>
+                    <form method="post" action="{{ url_for('admin_reject_user', user_id=user.id) }}" style="display:inline-block;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="ui mini negative button" type="submit">拒绝</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="ui segment" style="margin-top:2em;">
+    <div class="ui clearing header">
+        <h3 class="ui left floated header">已批准用户</h3>
+        <div class="ui right floated tiny label">共 {{ active_users|length }} 人</div>
+    </div>
+    <table class="ui compact celled table" id="userTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>用户名</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>标签权限</th>
+                <th>默认课程</th>
+                <th style="min-width:14rem;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in active_users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>
+                    <div class="header">{{ user.username }}</div>
+                    <div class="description">注册于 <span class="time-display" data-timestamp="{{ user.created_at }}"></span></div>
+                </td>
+                <td>{{ ', '.join(user.roles) if user.roles else '普通用户' }}</td>
+                <td>
+                    {% if user.banned %}
+                        <span class="ui red label">封禁</span>
+                    {% else %}
+                        <span class="ui green label">正常</span>
+                    {% endif %}
+                    {% if g.user and g.user.id == user.id %}
+                        <span class="ui grey label">自己</span>
+                    {% endif %}
+                </td>
+                <td style="min-width:16rem;">
+                    {% if user.tag_permissions %}
+                    <div class="ui labels" style="margin-bottom:0.5em;">
+                        {% for perm in user.tag_permissions %}
+                        <form method="post" action="{{ url_for('admin_remove_tag_permission', user_id=user.id) }}" style="display:inline-block;margin:0 0.25em 0.25em 0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="permission" value="{{ perm }}">
+                            <button class="ui mini basic label" type="submit">{{ perm }} <i class="close icon"></i></button>
+                        </form>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <span class="ui grey label">暂无</span>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('admin_add_tag_permission', user_id=user.id) }}" class="ui form" style="margin:0;">
+                        <div class="ui action input mini">
+                            <input type="text" name="permission" placeholder="新增标签">
+                            <button class="ui mini button" type="submit">添加</button>
+                        </div>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    </form>
+                </td>
+                <td style="min-width:16rem;">
+                    <form method="post" action="{{ url_for('admin_set_default_course', user_id=user.id) }}" class="ui form" style="margin:0;">
+                        <div class="fields" style="margin-bottom:0;">
+                            <div class="twelve wide field" style="padding-right:0.5em;">
+                                <select name="course_id" class="ui dropdown">
+                                    <option value="" {% if not user.default_course_id %}selected{% endif %}>跟随全局默认{% if global_default_course_name %}（{{ global_default_course_name }}）{% endif %}</option>
+                                    {% for course in types %}
+                                    <option value="{{ course.id }}" {% if user.default_course_id == course.id %}selected{% endif %}>{{ course.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="four wide field" style="padding-right:0;">
+                                <button class="ui mini button" type="submit">保存</button>
+                            </div>
+                        </div>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    </form>
+                </td>
+                <td>
+                    <div class="ui horizontal list">
+                        <div class="item">
+                            <form method="post" action="{{ url_for('admin_set_role', user_id=user.id) }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                {% if user.is_admin %}
+                                    <input type="hidden" name="is_admin" value="0">
+                                    <button class="ui mini button" type="submit" {% if g.user and g.user.id == user.id %}disabled{% endif %}>取消管理员</button>
+                                {% else %}
+                                    <input type="hidden" name="is_admin" value="1">
+                                    <button class="ui mini primary button" type="submit">设为管理员</button>
+                                {% endif %}
+                            </form>
+                        </div>
+                        <div class="item">
+                            {% if user.banned %}
+                            <form method="post" action="{{ url_for('admin_unban_user', user_id=user.id) }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="ui mini positive button" type="submit">解封</button>
+                            </form>
+                            {% else %}
+                            <form method="post" action="{{ url_for('admin_ban_user', user_id=user.id) }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="ui mini negative button" type="submit" {% if g.user and g.user.id == user.id %}disabled{% endif %}>封禁</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        <div class="item">
+                            <form method="post" action="{{ url_for('admin_clear_votes', user_id=user.id) }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="ui mini orange button" type="submit">清除评分</button>
+                            </form>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="ui segment" style="margin-top:2em;">
+    <h3 class="ui header">重置用户密码</h3>
+    <form class="ui form" method="post" action="{{ url_for('admin_reset_user_password') }}">
+        <div class="three fields">
+            <div class="field">
+                <label>用户</label>
+                <select name="user_id" required>
+                    {% for user in active_users %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label>新密码</label>
+                <input type="password" name="password" required>
+            </div>
+            <div class="field">
+                <label>确认新密码</label>
+                <input type="password" name="password_confirm" required>
+            </div>
+        </div>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ui primary button" type="submit">更新密码</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    if (document.getElementById('userTable')) {
+        new DataTable('#userTable', {
+            pageLength: 12,
+            lengthChange: false,
+            ordering: false
+        });
+    }
+    if (document.getElementById('pendingTable')) {
+        new DataTable('#pendingTable', {
+            pageLength: 6,
+            lengthChange: false,
+            ordering: false,
+            searching: false
+        });
+    }
+    $('.ui.dropdown').dropdown();
+    $('.ui.checkbox').checkbox();
+</script>
+{% endblock %}

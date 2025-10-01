@@ -16,7 +16,13 @@ def register_page_routes(app) -> None:
     @app.route("/")
     def index() -> str:
         groups = datastore.list_type_groups()
-        return render_template("index.html", course_groups=groups, active_page="problems")
+        default_course_id = datastore.resolve_start_course_id(getattr(g, "user", None))
+        return render_template(
+            "index.html",
+            course_groups=groups,
+            default_course_id=default_course_id,
+            active_page="problems",
+        )
 
     @app.route("/register", methods=["GET", "POST"])
     def register() -> Any:
@@ -57,6 +63,9 @@ def register_page_routes(app) -> None:
             else:
                 session["user_id"] = user["id"]
                 flash("登录成功", "success")
+                start_course = datastore.resolve_start_course_id(user)
+                if start_course is not None:
+                    return redirect(url_for("index", type=start_course))
                 return redirect(url_for("index"))
         return render_template("login.html", active_page="login")
 

@@ -1,0 +1,137 @@
+{% extends 'admin/layout.html' %}
+
+{% block extra_head %}
+<link href="https://cdn.datatables.net/2.0.2/css/dataTables.semanticui.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block admin_content %}
+<h2 class="ui header">管理概览</h2>
+<div class="ui three stackable cards">
+    <div class="card">
+        <div class="content">
+            <div class="header">用户总数</div>
+            <div class="description" style="font-size:2.4rem;font-weight:600;">{{ stats.total_users }}</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="content">
+            <div class="header">题目数量</div>
+            <div class="description" style="font-size:2.4rem;font-weight:600;">{{ stats.total_problems }}</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="content">
+            <div class="header">评分总数</div>
+            <div class="description" style="font-size:2.4rem;font-weight:600;">{{ stats.total_votes }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="ui segment" style="margin-top:2em;">
+    <h3 class="ui header">全局默认课程</h3>
+    <p>该设置决定所有用户在登录时首先看到的课程。用户可以另行设定个人默认课程。</p>
+    <form class="ui form" method="post" action="{{ url_for('admin_set_global_default_course') }}">
+        <div class="field">
+            <label>选择课程</label>
+            <select name="course_id" class="ui dropdown">
+                <option value="" {% if not global_default_course_id %}selected{% endif %}>不指定（自动选择首个课程）</option>
+                {% for course in types %}
+                <option value="{{ course.id }}" {% if global_default_course_id == course.id %}selected{% endif %}>{{ course.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ui primary button" type="submit">保存默认课程</button>
+    </form>
+</div>
+
+<div class="ui stackable grid" style="margin-top:2em;">
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">发布公告</h3>
+            <form class="ui form" method="post" action="{{ url_for('create_announcement') }}">
+                <div class="field">
+                    <label>标题</label>
+                    <input type="text" name="title" required>
+                </div>
+                <div class="field">
+                    <label>内容 （支持 HTML）</label>
+                    <textarea name="content" rows="4" required></textarea>
+                </div>
+                <div class="field">
+                    <div class="ui checkbox">
+                        <input type="checkbox" name="pinned" value="1">
+                        <label>置顶到公告列表顶部</label>
+                    </div>
+                </div>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui primary button" type="submit">发布公告</button>
+            </form>
+        </div>
+        <div class="ui segment" style="margin-top:2em;">
+            <h3 class="ui header">Legacy 配置导入</h3>
+            <p>将 <code>./vote</code> 目录下的用户、题目与评分导入到 <strong>legacy / 25年暑期题单</strong> 中。</p>
+            <form class="ui form" method="post" action="{{ url_for('admin_import_legacy') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="ui button" type="submit">导入旧版配置</button>
+            </form>
+        </div>
+    </div>
+    <div class="eight wide column">
+        <div class="ui segment">
+            <h3 class="ui header">公告列表</h3>
+            {% if announcements %}
+            <table class="ui celled table" id="announcementTable">
+                <thead>
+                    <tr>
+                        <th>标题</th>
+                        <th>时间</th>
+                        <th style="width:6rem;">状态</th>
+                        <th style="width:6rem;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in announcements %}
+                    <tr>
+                        <td>{{ item.title }}</td>
+                        <td><span class="time-display" data-timestamp="{{ item.created_at }}"></span></td>
+                        <td>
+                            {% if item.pinned %}
+                            <span class="ui red mini label">置顶</span>
+                            {% else %}
+                            <span class="ui grey mini label">普通</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="post" action="{{ url_for('delete_announcement', announcement_id=item.id) }}" style="margin:0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="ui mini negative button" type="submit">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="ui message">暂无公告。</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
+<script>
+    if (document.getElementById('announcementTable')) {
+        new DataTable('#announcementTable', {
+            pageLength: 8,
+            lengthChange: false,
+            ordering: false,
+            searching: false
+        });
+    }
+    $('.ui.checkbox').checkbox();
+    $('.ui.dropdown').dropdown();
+</script>
+{% endblock %}

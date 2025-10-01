@@ -111,12 +111,25 @@ function init(typ) {
     check_admin();
     load_announcement();
     if (isNaN(typ)) {
-        typ = parseInt(new URLSearchParams(window.location.search).get("type"));
+        const params = new URLSearchParams(window.location.search);
+        const queryType = params.get("type");
+        if (queryType !== null) {
+            typ = parseInt(queryType);
+        }
         if (isNaN(typ)) {
-            typ = parseInt(readRecordWithExpiry("lastType"));
+            const cachedType = readRecordWithExpiry("lastType");
+            if (cachedType !== null) {
+                typ = parseInt(cachedType);
+            }
+        }
+        if (isNaN(typ) && typeof window.__DEFAULT_COURSE_ID__ !== "undefined" && window.__DEFAULT_COURSE_ID__ !== null) {
+            typ = parseInt(window.__DEFAULT_COURSE_ID__);
         }
     } else {
         writeRecordWithExpiry("lastType", typ, 3);
+    }
+    if (isNaN(typ)) {
+        typ = 0;
     }
 
     $.get("/api/problems", { "type": typ }, function (res) {

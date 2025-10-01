@@ -32,7 +32,7 @@
             {% if g.user %}
                 <a class="item{% if active_page == 'profile' %} active{% endif %}" href="{{ url_for('profile', user_id=g.user['id']) }}">Hi, {{ g.user['username'] }}</a>
                 {% if g.user['is_admin'] %}
-                    <a class="item{% if active_page == 'admin' %} active{% endif %}" href="{{ url_for('admin_dashboard') }}">Admin</a>
+                    <a class="item{% if active_page == 'admin' %} active{% endif %}" href="{{ url_for('admin_overview') }}">Admin</a>
                 {% endif %}
                 <form class="item" action="{{ url_for('logout') }}" method="post" style="padding: 0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

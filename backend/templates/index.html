@@ -76,5 +76,8 @@
 {% block extra_scripts %}
 <script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
 <script src="{{ url_for('static', filename='js/circle.js') }}"></script>
+<script>
+    window.__DEFAULT_COURSE_ID__ = {{ default_course_id|tojson }};
+</script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 {% endblock %}

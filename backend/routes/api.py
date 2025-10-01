@@ -39,9 +39,11 @@ def register_api_routes(app) -> None:
             type_id = 0
         payload = datastore.get_type_payload(type_id)
         if not payload:
-            if datastore.problems_by_type:
-                payload = next(iter(datastore.problems_by_type.values()))
-            else:
+            fallback_id = datastore.resolve_start_course_id(getattr(g, "user", None))
+            if fallback_id is not None:
+                payload = datastore.get_type_payload(fallback_id)
+                type_id = fallback_id
+            if not payload:
                 payload = {"type": {"id": type_id, "name": ""}, "problems": []}
         active_user = getattr(g, "user", None)
         for item in payload.get("problems", []):

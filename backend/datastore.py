@@ -29,6 +29,7 @@ DEFAULT_STORE_PAYLOAD: Dict[str, Any] = {
     "course_contests": {},
     "course_categories": [],
     "type_categories": {},
+    "global_default_course_id": None,
     "next_problem_id": 1,
     "next_user_id": 1,
     "next_vote_id": 1,
@@ -156,6 +157,7 @@ class DataStore:
             user.setdefault("luoguid", "")
             user.setdefault("info", "")
             user.setdefault("created_at", _now_ts())
+            user["default_course_id"] = self._normalise_course_id(user.get("default_course_id"))
             if user.get("is_admin") and "admin" not in user["roles"]:
                 user["roles"].append("admin")
             # Ensure tag permissions are unique strings
@@ -194,6 +196,11 @@ class DataStore:
             vote.setdefault("score", 0)
             vote.setdefault("created_at", vote.get("created_at", _now_ts()))
             vote.setdefault("updated_at", vote.get("updated_at", vote["created_at"]))
+        raw_global_default = self.store.get("global_default_course_id")
+        if raw_global_default is None and "global_default_course_id" not in self.store:
+            self.store["global_default_course_id"] = None
+        else:
+            self.store["global_default_course_id"] = self._normalise_course_id(raw_global_default)
         if self.store["next_problem_id"] < self.next_problem_id:
             self.store["next_problem_id"] = self.next_problem_id
 
@@ -415,6 +422,15 @@ class DataStore:
     def _save_store(self) -> None:
         STORE_PATH.write_text(json.dumps(self.store, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _normalise_course_id(self, value: Any) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        try:
+            course_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return course_id if course_id in self.types else None
+
     def _parse_time_string(self, value: Optional[str]) -> int:
         if not value:
             return _now_ts()
@@ -450,6 +466,34 @@ class DataStore:
     def list_course_contests(self, type_id: int) -> List[Dict[str, Any]]:
         contests = self.store.get("course_contests", {}).get(str(type_id), [])
         return list(contests)
+
+    def get_first_course_id(self) -> Optional[int]:
+        return min(self.types.keys()) if self.types else None
+
+    def get_global_default_course_id(self) -> Optional[int]:
+        default_id = self._normalise_course_id(self.store.get("global_default_course_id"))
+        return default_id
+
+    def set_global_default_course(self, course_id: Optional[int]) -> None:
+        if course_id is None:
+            self.store["global_default_course_id"] = None
+            self._save_store()
+            return
+        normalised = self._normalise_course_id(course_id)
+        if normalised is None:
+            raise ValueError("课程不存在")
+        self.store["global_default_course_id"] = normalised
+        self._save_store()
+
+    def resolve_start_course_id(self, user: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        if user:
+            preferred = self._normalise_course_id(user.get("default_course_id"))
+            if preferred is not None:
+                return preferred
+        global_default = self.get_global_default_course_id()
+        if global_default is not None:
+            return global_default
+        return self.get_first_course_id()
 
     def list_categories(self) -> List[Dict[str, Any]]:
         return sorted(self.course_categories.values(), key=lambda item: item["id"])
@@ -593,6 +637,11 @@ class DataStore:
         self.problems_by_type.pop(type_id, None)
         cleanup_happened = True
         if cleanup_happened:
+            if self.store.get("global_default_course_id") == type_id:
+                self.store["global_default_course_id"] = None
+            for user in self.store.get("users", []):
+                if user.get("default_course_id") == type_id:
+                    user["default_course_id"] = None
             self._save_store()
         return True
 
@@ -705,6 +754,7 @@ class DataStore:
             "banned": False,
             "roles": [],
             "tag_permissions": [],
+            "default_course_id": None,
         }
         self.store["next_user_id"] += 1
         self.store.setdefault("users", []).append(user)
@@ -797,6 +847,21 @@ class DataStore:
         user["tag_permissions"] = [p for p in perms if p != perm]
         if save:
             self._save_store()
+        return True
+
+    def set_user_default_course(self, user_id: int, course_id: Optional[int]) -> bool:
+        user = self.find_user_by_id(user_id)
+        if not user:
+            return False
+        if course_id is None or course_id == "":
+            user["default_course_id"] = None
+            self._save_store()
+            return True
+        normalised = self._normalise_course_id(course_id)
+        if normalised is None:
+            raise ValueError("课程不存在")
+        user["default_course_id"] = normalised
+        self._save_store()
         return True
 
     def clear_votes_for_user(self, user_id: int) -> int:

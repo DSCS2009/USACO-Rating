@@ -1,9 +1,14 @@
+.ui.container {
+    width: 95% !important;
+    max-width: 95% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
 .main-container {
 	margin-top: 3rem;
-	margin-left: 6%;
-	margin-right: 6%;
 	margin-bottom: 80px;
-	width: 88%;
+	width: 100%;
 }
 
 span.difficulty-circle {
@@ -24,9 +29,8 @@ span.difficulty-circle {
 }
 
 .grayContainer {
-    margin-bottom: 60px;
-    width: 80%;
-    margin-left: 10%;
+    margin: 0 auto 60px auto;
+    width: 95%;
     background-color: #FAFAFA;
     box-shadow: 0 4px 6px rgb(8 8 8 / 10%), 0 0 0 1px rgb(8 8 8 / 10%);
     padding: 40px 50px 40px 50px;

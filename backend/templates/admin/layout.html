@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% set active_page = 'admin' %}
+
+{% block content %}
+<div class="ui stackable grid admin-layout">
+    <div class="four wide column">
+        <div class="ui segment">
+            <div class="ui secondary vertical pointing menu">
+                <a class="item{% if admin_active == 'overview' %} active{% endif %}" href="{{ url_for('admin_overview') }}">概览</a>
+                <a class="item{% if admin_active == 'users' %} active{% endif %}" href="{{ url_for('admin_users') }}">用户管理</a>
+                <a class="item{% if admin_active == 'courses' %} active{% endif %}" href="{{ url_for('admin_courses') }}">课程与内容</a>
+            </div>
+            <div class="ui horizontal divider" style="margin-top:1.5em;">当前默认</div>
+            <div class="ui relaxed list" style="margin-top:0.5em;">
+                <div class="item">
+                    <div class="content">
+                        <div class="description">
+                            {% if global_default_course_name %}
+                                {{ global_default_course_name }}
+                            {% else %}
+                                未设置全局默认课程
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="twelve wide column">
+        {% block admin_content %}{% endblock %}
+    </div>
+</div>
+{% endblock %}
