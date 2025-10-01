@@ -443,21 +443,26 @@ class DataStore:
             path.write_text(json.dumps(default_payload, ensure_ascii=False, indent=2), encoding="utf-8")
             return data
 
-    def _init_problem_stats(self, item: Dict[str, Any]) -> None:
+    def _init_problem_stats(self, item: Dict[str, Any], *, reset: bool = False) -> None:
         stats: Dict[str, Dict[str, float]] = {}
         for metric, mapping in PROBLEM_STATS_SPECS.items():
             cnt_key = mapping["cnt"]
             avg_key = mapping["avg"]
             sd_key = mapping["sd"]
-            count = int(item.get(cnt_key) or 0)
-            avg_raw = item.get(avg_key)
-            avg = float(avg_raw) if avg_raw is not None else 0.0
-            sd_raw = item.get(sd_key)
-            sd = float(sd_raw) if sd_raw is not None else 0.0
+            if reset:
+                count = 0
+                avg = 0.0
+                sd = 0.0
+            else:
+                count = int(item.get(cnt_key) or 0)
+                avg_raw = item.get(avg_key)
+                avg = float(avg_raw) if avg_raw is not None else 0.0
+                sd_raw = item.get(sd_key)
+                sd = float(sd_raw) if sd_raw is not None else 0.0
             sum_val = avg * count
             sum_sq = (sd ** 2 + avg ** 2) * count if count else 0.0
             stats[metric] = {"count": count, "sum": sum_val, "sum_sq": sum_sq}
-            if count <= 0:
+            if reset or count <= 0:
                 item[cnt_key] = 0
                 item[avg_key] = None
                 item[sd_key] = None
@@ -474,7 +479,7 @@ class DataStore:
 
     def _reset_problem_stats(self) -> None:
         for problem in self.problem_map.values():
-            self._init_problem_stats(problem)
+            self._init_problem_stats(problem, reset=True)
             problem["median_thinking"] = None
             problem["median_implementation"] = None
             problem["medium_difficulty"] = None
