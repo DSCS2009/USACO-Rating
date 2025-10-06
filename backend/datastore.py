@@ -670,9 +670,11 @@ class DataStore:
             self._save_store()
 
     def set_course_categories(self, type_id: int, category_ids: Iterable[Any]) -> None:
+        self._ensure_store_fresh()
         self._set_course_categories(type_id, category_ids, save=True)
 
     def create_category(self, name: str) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         title = name.strip()
         if not title:
             raise ValueError("分类名称不能为空")
@@ -689,6 +691,7 @@ class DataStore:
         return entry
 
     def delete_category(self, category_id: int) -> bool:
+        self._ensure_store_fresh()
         if category_id not in self.course_categories:
             return False
         self.store["course_categories"] = [
@@ -728,6 +731,7 @@ class DataStore:
         return True
 
     def create_course(self, name: str, category_ids: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         title = name.strip()
         if not title:
             raise ValueError("课程名称不能为空")
@@ -747,6 +751,7 @@ class DataStore:
         return entry
 
     def delete_course(self, type_id: int) -> bool:
+        self._ensure_store_fresh()
         if type_id not in self.custom_types:
             return False
         bucket = self.problems_by_type.get(type_id, {})
@@ -774,6 +779,7 @@ class DataStore:
         return True
 
     def create_contest(self, type_id: int, name: str) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         if type_id not in self.types:
             raise ValueError("课程不存在")
         title = name.strip()
@@ -791,6 +797,7 @@ class DataStore:
         return entry
 
     def delete_contest(self, type_id: int, contest_id: int) -> bool:
+        self._ensure_store_fresh()
         contests_map = self.store.setdefault("course_contests", {})
         bucket = contests_map.get(str(type_id))
         if not bucket:
@@ -815,23 +822,28 @@ class DataStore:
         return True
 
     def get_type_payload(self, type_id: int) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
         return self.problems_by_type.get(type_id)
 
     def get_problem(self, problem_id: int) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
         return self.problem_map.get(problem_id)
 
     # Announcement operations ------------------------------------------
 
     def newest_announcement_ts(self) -> int:
+        self._ensure_store_fresh()
         if not self.store["announcements"]:
             return 0
         return max(item["created_at"] for item in self.store["announcements"])
 
     def list_announcements(self) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         items = sorted(self.store["announcements"], key=lambda x: (-int(x.get("pinned", 0)), -x["created_at"]))
         return items
 
     def create_announcement(self, title: str, content: str, pinned: bool) -> None:
+        self._ensure_store_fresh()
         announcement = {
             "id": self.store["next_announcement_id"],
             "title": title,
@@ -844,6 +856,7 @@ class DataStore:
         self._save_store()
 
     def delete_announcement(self, announcement_id: int) -> bool:
+        self._ensure_store_fresh()
         before = len(self.store["announcements"])
         self.store["announcements"] = [a for a in self.store["announcements"] if a["id"] != announcement_id]
         if len(self.store["announcements"]) != before:
@@ -854,6 +867,7 @@ class DataStore:
     # User operations ---------------------------------------------------
 
     def find_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
         username_lower = username.lower()
         for user in self.store.get("users", []):
             if user["username"].lower() == username_lower:
@@ -861,12 +875,14 @@ class DataStore:
         return None
 
     def find_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        self._ensure_store_fresh()
         for user in self.store.get("users", []):
             if user["id"] == user_id:
                 return user
         return None
 
     def register_user(self, username: str, password: str, luoguid: str, info: str) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         if self.find_user_by_username(username):
             raise ValueError("用户名已存在")
         user = {
@@ -890,11 +906,13 @@ class DataStore:
         return user
 
     def update_password(self, user: Dict[str, Any], password: str) -> None:
+        self._ensure_store_fresh()
         user["password_hash"] = generate_password_hash(password)
         user["legacy_password_hash"] = None
         self._save_store()
 
     def verify_user_password(self, user: Dict[str, Any], password: str) -> bool:
+        self._ensure_store_fresh()
         if not user:
             return False
         password_hash = user.get("password_hash")
@@ -911,6 +929,7 @@ class DataStore:
         return False
 
     def approve_user(self, user_id: int) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -919,6 +938,7 @@ class DataStore:
         return True
 
     def reject_user(self, user_id: int) -> bool:
+        self._ensure_store_fresh()
         users = self.store.get("users", [])
         before = len(users)
         self.store["users"] = [user for user in users if user["id"] != user_id]
@@ -928,6 +948,7 @@ class DataStore:
         return False
 
     def set_admin(self, user_id: int, is_admin: bool) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -942,6 +963,7 @@ class DataStore:
         return True
 
     def set_banned(self, user_id: int, banned: bool) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -950,6 +972,7 @@ class DataStore:
         return True
 
     def add_tag_permission(self, user_id: int, permission: str, *, save: bool = True) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -965,6 +988,7 @@ class DataStore:
         return True
 
     def remove_tag_permission(self, user_id: int, permission: str, *, save: bool = True) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -978,6 +1002,7 @@ class DataStore:
         return True
 
     def set_user_default_course(self, user_id: int, course_id: Optional[int]) -> bool:
+        self._ensure_store_fresh()
         user = self.find_user_by_id(user_id)
         if not user:
             return False
@@ -993,6 +1018,7 @@ class DataStore:
         return True
 
     def clear_votes_for_user(self, user_id: int) -> int:
+        self._ensure_store_fresh()
         cleared, _ = self._remove_votes_matching(lambda vote: vote.get("user_id") == user_id)
         return cleared
 
@@ -1010,6 +1036,7 @@ class DataStore:
         *,
         save: bool = True,
     ) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         existing = None
         for vote in self.store.get("votes", []):
             if vote["user_id"] == user_id and vote["problem_id"] == problem_id:
@@ -1172,6 +1199,7 @@ class DataStore:
         return cleared, removed_vote_ids
 
     def list_votes_for_problem(self, problem_id: int) -> List[Dict[str, Any]]:
+        self._ensure_store_fresh()
         votes = []
         for vote in self.store.get("votes", []):
             if vote["problem_id"] == problem_id:
@@ -1192,10 +1220,12 @@ class DataStore:
         return None
 
     def mark_vote_deleted(self, vote_id: int) -> bool:
+        self._ensure_store_fresh()
         cleared, removed_ids = self._remove_votes_matching(lambda vote: vote.get("id") == vote_id)
         return bool(removed_ids or cleared)
 
     def mark_votes_deleted_bulk(self, vote_ids: List[int]) -> int:
+        self._ensure_store_fresh()
         try:
             target_ids = {int(vote_id) for vote_id in vote_ids}
         except (TypeError, ValueError):
@@ -1278,6 +1308,7 @@ class DataStore:
     # Problem mutations -------------------------------------------------
 
     def apply_problem_edit(self, pid: int, payload: Dict[str, Any]) -> bool:
+        self._ensure_store_fresh()
         problem = self.problem_map.get(pid)
         if not problem:
             return False
@@ -1287,6 +1318,7 @@ class DataStore:
         return True
 
     def create_problem(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         problem_id = self.store["next_problem_id"]
         self.store["next_problem_id"] += 1
         payload = dict(payload)
@@ -1321,6 +1353,7 @@ class DataStore:
         return payload
 
     def delete_problem(self, problem_id: int) -> bool:
+        self._ensure_store_fresh()
         custom_ids = {problem["id"] for problem in self.store.get("custom_problems", [])}
         if problem_id not in custom_ids:
             raise ValueError("只能删除自定义题目")
@@ -1336,6 +1369,7 @@ class DataStore:
         *,
         save: bool = True,
     ) -> bool:
+        self._ensure_store_fresh()
         problem = self.problem_map.get(problem_id)
         if not problem:
             return False
@@ -1372,6 +1406,7 @@ class DataStore:
         return True
 
     def can_user_edit_problem_meta(self, user: Optional[Dict[str, Any]], problem_id: int) -> bool:
+        self._ensure_store_fresh()
         if not user:
             return False
         if user.get("is_admin"):
@@ -1392,6 +1427,7 @@ class DataStore:
         votes_path: Path,
         problems_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
+        self._ensure_store_fresh()
         summary = {
             "users_created": 0,
             "users_updated": 0,
