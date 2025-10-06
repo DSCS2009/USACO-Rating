@@ -277,7 +277,14 @@ function vote(id) {
                     identifier: 'qual',
                     optional: true,
                     rules: [
-                        { type: 'decimal[-5..5]', prompt: '质量范围为 -5 到 5' }
+                        {
+                            type: 'regExp[/^-?(?:\\d+|\\d*\\.\\d+)$/]',
+                            prompt: '请输入有效的浮点数'
+                        },
+                        {
+                            type: 'number[-5..5]',
+                            prompt: '质量范围为 -5 到 5'
+                        }
                     ]
                 }
             },
@@ -291,7 +298,6 @@ function vote(id) {
             const qual = qualRaw === '' ? null : parseFloat(qualRaw);
             const isPublic = $('#public').prop('checked');
             const comment = $('#comment').val();
-
             if (isNaN(think) || isNaN(impl)) {
                 alert("请输入有效的难度数值。");
                 return;
@@ -648,7 +654,7 @@ function quality2Str(quality, cnt, sd, median = false, problemId = null) {
     if (sd != null && sd >= 1.25) {
         showQuality += '<sup style="color: red; font-size: 1em; cursor: pointer;"  data-tooltip="评分标准差过高">*</sup>';
     }
-    if (cnt < 10) {
+    if (cnt < 5) {
         showQuality += '<sup style="color: red; font-size: 1em; cursor: pointer;"  data-tooltip="评分人数过少">*</sup>';
     }
     if (sd != null) {
@@ -708,7 +714,7 @@ function render_list_quality(quality, delta) {
         res += '<span style="color: rgb(0, 128, 0);">';
     }
     let showQuality = Math.round(quality * 100) / 100;
-    if (quality <= 0.5) {
+    if (quality <= -4) {
         showQuality = "💩 " + showQuality;
     }
     res += showQuality + '</span>';
@@ -798,7 +804,7 @@ function showVotes(id) {
                 {
                     select: 0,
                     render: function (data, type, row) {
-                        return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (isAdmin ? `（${row.score}分）` : (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : ""));
+                        return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : "") + `<a href="/profile/${row.user_id}">${row.username}</a>`;
                     }
                 },
                 {
@@ -856,11 +862,7 @@ function showVotes(id) {
                     select: 7,
                     sortable: false,
                     render: function (data, type, row) {
-                        if (!isAdmin) {
-                            return `<a onclick=\"report(${row.id})\">举报</a>`;
-                        } else {
-                            return `<a href="/profile/${row.user_id}">${row.username}</a>`;
-                        }
+                        return `<a onclick=\"report(${row.id})\">举报</a>`;
                     }
                 }
             ]
