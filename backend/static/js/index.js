@@ -774,15 +774,6 @@ function showVotes(id) {
                             <th>思维</th>
                             <th>实现</th>
                             <th>综合</th>
-                        if (!isAdmin) {
-                        if (row.public) {
-                            return `< a href="/profile/${row.user_id}" > ${ row.username }</a > `;
-                        } else {
-                            return `< a onclick = "report(${row.id})" > 举报</a > `;
-                        }
-                    } else {
-                        return `< a href = "/profile/${row.user_id}" > ${ row.username }</a > `;
-                    }
                             <th>评论</th>
                             <th>公开</th>
                             <th>操作</th>
@@ -795,96 +786,96 @@ function showVotes(id) {
             classContent: 'content',
             class: 'fullscreen',
         }).modal('show');
-    let table = new DataTable('#votesTable', {
-        sortable: true,
-        pageLength: 8,
-        lengthChange: false,
-        searching: false,
-        info: false,
-        data: data.votes,
-        pagingType: 'simple_numbers',
-        columns: [
-            {
-                select: 0,
-                render: function (data, type, row) {
-                    return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (isAdmin ? `（${row.score}分）` : (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : ""));
-                }
-            },
-            {
-                select: 1,
-                render: function (data, type, row) {
-                    if (type === 'display') {
-                        return render_list_difficulty(row.thinking, row.thinking_delta);
+        let table = new DataTable('#votesTable', {
+            sortable: true,
+            pageLength: 8,
+            lengthChange: false,
+            searching: false,
+            info: false,
+            data: data.votes,
+            pagingType: 'simple_numbers',
+            columns: [
+                {
+                    select: 0,
+                    render: function (data, type, row) {
+                        return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (isAdmin ? `（${row.score}分）` : (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : ""));
                     }
-                    return row.thinking;
-                }
-            },
-            {
-                select: 2,
-                render: function (data, type, row) {
-                    if (type === 'display') {
-                        return render_list_difficulty(row.implementation, row.implementation_delta);
-                    }
-                    return row.implementation;
-                }
-            },
-            {
-                select: 3,
-                render: function (data, type, row) {
-                    if (type === 'display') {
-                        return render_list_difficulty(row.difficulty, row.difficulty_delta);
-                    }
-                    return row.difficulty;
-                }
-            },
-            {
-                select: 4,
-                render: function (data, type, row) {
-                    if (type === 'display') {
-                        return render_list_quality(row.quality, row.quality_delta);
-                    }
-                    return row.quality;
-                }
-            },
-            {
-                select: 5,
-                sortable: false,
-                render: function (data, type, row) {
-                    return escapeHtml(row.comment || '').replace(/\n/g, '<br>');
                 },
-                width: "30%"
-            },
-            {
-                select: 6,
-                sortable: false,
-                render: function (data, type, row) {
-                    return row.public ? "是" : "否";
-                }
-            },
-            {
-                select: 7,
-                sortable: false,
-                render: function (data, type, row) {
-                    if (!isAdmin) {
-                        return `<a onclick=\"report(${row.id})\">举报</a>`;
-                    } else {
-                        return `<a href="/profile/${row.user_id}">${row.username}</a>`;
+                {
+                    select: 1,
+                    render: function (data, type, row) {
+                        if (type === 'display') {
+                            return render_list_difficulty(row.thinking, row.thinking_delta);
+                        }
+                        return row.thinking;
+                    }
+                },
+                {
+                    select: 2,
+                    render: function (data, type, row) {
+                        if (type === 'display') {
+                            return render_list_difficulty(row.implementation, row.implementation_delta);
+                        }
+                        return row.implementation;
+                    }
+                },
+                {
+                    select: 3,
+                    render: function (data, type, row) {
+                        if (type === 'display') {
+                            return render_list_difficulty(row.difficulty, row.difficulty_delta);
+                        }
+                        return row.difficulty;
+                    }
+                },
+                {
+                    select: 4,
+                    render: function (data, type, row) {
+                        if (type === 'display') {
+                            return render_list_quality(row.quality, row.quality_delta);
+                        }
+                        return row.quality;
+                    }
+                },
+                {
+                    select: 5,
+                    sortable: false,
+                    render: function (data, type, row) {
+                        return escapeHtml(row.comment || '').replace(/\n/g, '<br>');
+                    },
+                    width: "30%"
+                },
+                {
+                    select: 6,
+                    sortable: false,
+                    render: function (data, type, row) {
+                        return row.public ? "是" : "否";
+                    }
+                },
+                {
+                    select: 7,
+                    sortable: false,
+                    render: function (data, type, row) {
+                        if (!isAdmin) {
+                            return `<a onclick=\"report(${row.id})\">举报</a>`;
+                        } else {
+                            return `<a href="/profile/${row.user_id}">${row.username}</a>`;
+                        }
                     }
                 }
+            ]
+        });
+        modal.modal({
+            onShow: function () {
+                table.draw();
+                DataTable.tables({ visible: true, api: true }).columns.adjust();
+            },
+            onHidden: function () {
+                table.destroy();
+                modal.remove();
             }
-        ]
+        });
     });
-    modal.modal({
-        onShow: function () {
-            table.draw();
-            DataTable.tables({ visible: true, api: true }).columns.adjust();
-        },
-        onHidden: function () {
-            table.destroy();
-            modal.remove();
-        }
-    });
-});
 }
 
 
