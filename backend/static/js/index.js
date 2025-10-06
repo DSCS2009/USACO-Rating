@@ -160,7 +160,7 @@ function init(typ) {
                 display(curD);
             }
         });
-        
+
         // Load saved setting
         var savedHideUnrated = readRecord('hideUnratedRatings');
         if (savedHideUnrated === 'true') {
@@ -168,7 +168,7 @@ function init(typ) {
             $('#hideUnrated').prop('checked', true);
             loadUserVotes(nowType);
         }
-        
+
         // $('#practice').prop('checked',true);
         sortProblems(0);
         // displayAnnouncement();
@@ -186,7 +186,7 @@ function loadUserVotes(typeId) {
         }
         userVotedProblems = new Set(res.voted_problems);
         display(curD);
-    }).fail(function() {
+    }).fail(function () {
         console.log("Failed to load user votes");
         hideUnratedRatings = false;
         $('#hideUnrated').prop('checked', false);
@@ -374,7 +374,7 @@ function showInfo(id) {
             <p>出题人：${setterText || 'N/A'}</p>
             <p>来源：${sourceText || 'N/A'}</p>
             <p>通过率： ${passRate}</p>
-            <p>平均分： ${avgScore}</p>` ,
+            <p>平均分： ${avgScore}</p>`,
         classContent: 'content',
     }).modal('show');
 }
@@ -730,6 +730,22 @@ function deleteVote(id) {
     });
 }
 
+function deleteProblem(id) {
+    if (!confirm("确认删除该题目及其所有评分记录吗？")) {
+        return;
+    }
+    $.post('/api/problem/delete', { "pid": id }, function (res) {
+        if (res.success) {
+            alert("题目已删除");
+            location.reload();
+        } else {
+            alert("删除失败：" + (res.error || "未知错误"));
+        }
+    }).fail(function () {
+        alert("删除失败：网络错误");
+    });
+}
+
 function report(id) {
     $.post('/api/report', { "vid": id }, function (res) {
         if (res.success) {
@@ -758,7 +774,15 @@ function showVotes(id) {
                             <th>思维</th>
                             <th>实现</th>
                             <th>综合</th>
-                            <th>质量</th>
+                        if (!isAdmin) {
+                        if (row.public) {
+                            return `< a href="/profile/${row.user_id}" > ${ row.username }</a > `;
+                        } else {
+                            return `< a onclick = "report(${row.id})" > 举报</a > `;
+                        }
+                    } else {
+                        return `< a href = "/profile/${row.user_id}" > ${ row.username }</a > `;
+                    }
                             <th>评论</th>
                             <th>公开</th>
                             <th>操作</th>
@@ -771,96 +795,96 @@ function showVotes(id) {
             classContent: 'content',
             class: 'fullscreen',
         }).modal('show');
-        let table = new DataTable('#votesTable', {
-            sortable: true,
-            pageLength: 8,
-            lengthChange: false,
-            searching: false,
-            info: false,
-            data: data.votes,
-            pagingType: 'simple_numbers',
-            columns: [
-                {
-                    select: 0,
-                    render: function (data, type, row) {
-                        return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (isAdmin ? `（${row.score}分）` : (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : ""));
+    let table = new DataTable('#votesTable', {
+        sortable: true,
+        pageLength: 8,
+        lengthChange: false,
+        searching: false,
+        info: false,
+        data: data.votes,
+        pagingType: 'simple_numbers',
+        columns: [
+            {
+                select: 0,
+                render: function (data, type, row) {
+                    return `<strong>${row.id}</strong>` + (row.deleted ? " <span style='color: red;'>已删除</span>" : "") + (isAdmin ? `（${row.score}分）` : (row.accepted ? `<i class=\"check icon\" style=\"color:green\"></i>` : ""));
+                }
+            },
+            {
+                select: 1,
+                render: function (data, type, row) {
+                    if (type === 'display') {
+                        return render_list_difficulty(row.thinking, row.thinking_delta);
                     }
-                },
-                {
-                    select: 1,
-                    render: function (data, type, row) {
-                        if (type === 'display') {
-                            return render_list_difficulty(row.thinking, row.thinking_delta);
-                        }
-                        return row.thinking;
+                    return row.thinking;
+                }
+            },
+            {
+                select: 2,
+                render: function (data, type, row) {
+                    if (type === 'display') {
+                        return render_list_difficulty(row.implementation, row.implementation_delta);
                     }
-                },
-                {
-                    select: 2,
-                    render: function (data, type, row) {
-                        if (type === 'display') {
-                            return render_list_difficulty(row.implementation, row.implementation_delta);
-                        }
-                        return row.implementation;
+                    return row.implementation;
+                }
+            },
+            {
+                select: 3,
+                render: function (data, type, row) {
+                    if (type === 'display') {
+                        return render_list_difficulty(row.difficulty, row.difficulty_delta);
                     }
-                },
-                {
-                    select: 3,
-                    render: function (data, type, row) {
-                        if (type === 'display') {
-                            return render_list_difficulty(row.difficulty, row.difficulty_delta);
-                        }
-                        return row.difficulty;
+                    return row.difficulty;
+                }
+            },
+            {
+                select: 4,
+                render: function (data, type, row) {
+                    if (type === 'display') {
+                        return render_list_quality(row.quality, row.quality_delta);
                     }
+                    return row.quality;
+                }
+            },
+            {
+                select: 5,
+                sortable: false,
+                render: function (data, type, row) {
+                    return escapeHtml(row.comment || '').replace(/\n/g, '<br>');
                 },
-                {
-                    select: 4,
-                    render: function (data, type, row) {
-                        if (type === 'display') {
-                            return render_list_quality(row.quality, row.quality_delta);
-                        }
-                        return row.quality;
-                    }
-                },
-                {
-                    select: 5,
-                    sortable: false,
-                    render: function (data, type, row) {
-                        return escapeHtml(row.comment || '').replace(/\n/g, '<br>');
-                    },
-                    width: "30%"
-                },
-                {
-                    select: 6,
-                    sortable: false,
-                    render: function (data, type, row) {
-                        return row.public ? "是" : "否";
-                    }
-                },
-                {
-                    select: 7,
-                    sortable: false,
-                    render: function (data, type, row) {
-                        if (!isAdmin) {
-                            return `<a onclick=\"report(${row.id})\">举报</a>`;
-                        } else {
-                            return `<a href="/profile/${row.user_id}">${row.username}</a>`;
-                        }
+                width: "30%"
+            },
+            {
+                select: 6,
+                sortable: false,
+                render: function (data, type, row) {
+                    return row.public ? "是" : "否";
+                }
+            },
+            {
+                select: 7,
+                sortable: false,
+                render: function (data, type, row) {
+                    if (!isAdmin) {
+                        return `<a onclick=\"report(${row.id})\">举报</a>`;
+                    } else {
+                        return `<a href="/profile/${row.user_id}">${row.username}</a>`;
                     }
                 }
-            ]
-        });
-        modal.modal({
-            onShow: function () {
-                table.draw();
-                DataTable.tables({ visible: true, api: true }).columns.adjust();
-            },
-            onHidden: function () {
-                table.destroy();
-                modal.remove();
             }
-        });
+        ]
     });
+    modal.modal({
+        onShow: function () {
+            table.draw();
+            DataTable.tables({ visible: true, api: true }).columns.adjust();
+        },
+        onHidden: function () {
+            table.destroy();
+            modal.remove();
+        }
+    });
+});
 }
 
 

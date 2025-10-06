@@ -5,8 +5,10 @@
 {% block extra_head %}
 <link href="https://cdn.datatables.net/2.0.2/css/dataTables.dataTables.min.css" rel="stylesheet">
 <link href="https://cdn.staticfile.org/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
-<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css" rel="stylesheet">
-<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css" rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/css/star-rating.min.css"
+    rel="stylesheet">
+<link href="https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/bootstrap-star-rating/4.1.2/themes/krajee-svg/theme.min.css"
+    rel="stylesheet">
 {% endblock %}
 
 {% block content %}
@@ -29,7 +31,7 @@
     <div class="text">Sort By</div>
     <i class="dropdown icon"></i>
     <div class="menu">
-        <a class="item" href="javascript:sortProblems(0)">Contest</a>
+        <a class="item" href="javascript:sortProblems(0)">比赛</a>
         <a class="item" href="javascript:sortProblems(5)">知识点难度</a>
         <a class="item" href="javascript:sortProblems(1)">思维难度</a>
         <a class="item" href="javascript:sortProblems(2)">实现难度</a>
@@ -77,7 +79,7 @@
 <script src="https://cdn.datatables.net/2.0.2/js/dataTables.min.js"></script>
 <script src="{{ url_for('static', filename='js/circle.js') }}"></script>
 <script>
-    window.__DEFAULT_COURSE_ID__ = {{ default_course_id|tojson }};
+    window.__DEFAULT_COURSE_ID__ = {{ default_course_id | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 {% endblock %}
