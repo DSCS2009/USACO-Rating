@@ -780,6 +780,7 @@ function showVotes(id) {
                             <th>思维</th>
                             <th>实现</th>
                             <th>综合</th>
+                            <th>质量</th>
                             <th>评论</th>
                             <th>公开</th>
                             <th>操作</th>
