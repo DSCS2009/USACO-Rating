@@ -15,7 +15,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 PROBLEMS_PATH = DATA_DIR / "problems.json"
 TYPES_PATH = DATA_DIR / "types.json"
-STORE_PATH = DATA_DIR / "store.json"
+STORE_DIR = DATA_DIR / "store"
+LEGACY_STORE_PATH = DATA_DIR / "store.json"
 ANNOUNCEMENTS_SEED_PATH = DATA_DIR / "announcements.json"
 
 DEFAULT_TYPES_PAYLOAD: Dict[str, Any] = {"types": [], "groups": []}
@@ -50,8 +51,12 @@ PROBLEM_STATS_SPECS = {
 }
 
 
-def _clone_default(payload: Any) -> Any:
+def _clone_payload(payload: Any) -> Any:
     return json.loads(json.dumps(payload, ensure_ascii=False))
+
+
+def _clone_default(payload: Any) -> Any:
+    return _clone_payload(payload)
 
 
 def _now_ts() -> int:
@@ -98,6 +103,7 @@ class DataStore:
         self.course_categories: Dict[int, Dict[str, Any]] = {}
         self.type_categories: Dict[int, List[int]] = {}
         self._store_mtime: float = 0.0
+        self._persisted_store: Dict[str, Any] = {}
         self._load_store()
         self._bootstrap_announcements()
 
@@ -130,8 +136,34 @@ class DataStore:
             self.problems_by_type[type_id] = {"type": type_info, "problems": problems}
         self.next_problem_id = max(self.problem_map.keys(), default=0) + 1
 
+    def _load_store_payload(self) -> Dict[str, Any]:
+        if STORE_DIR.exists():
+            files = [path for path in STORE_DIR.glob("*.json") if path.is_file()]
+            if files:
+                return self._load_segmented_store(files)
+        return self._load_json_file(LEGACY_STORE_PATH, DEFAULT_STORE_PAYLOAD)
+
+    def _load_segmented_store(self, files: Iterable[Path]) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        for path in files:
+            key = path.stem
+            try:
+                text = path.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if not text:
+                continue
+            try:
+                payload[key] = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+        for key, default in DEFAULT_STORE_PAYLOAD.items():
+            if key not in payload:
+                payload[key] = _clone_default(default)
+        return payload
+
     def _load_store(self) -> None:
-        self.store = self._load_json_file(STORE_PATH, DEFAULT_STORE_PAYLOAD)
+        self.store = self._load_store_payload()
         self.course_categories.clear()
         self.type_categories.clear()
         self.store.setdefault("announcements", [])
@@ -370,6 +402,7 @@ class DataStore:
             if problem:
                 problem.update(override)
         self._rebuild_problem_stats()
+        self._persisted_store = _clone_payload(self.store)
         self._store_mtime = self._store_file_mtime()
 
     def _load_custom_types_from_store(self) -> None:
@@ -524,13 +557,66 @@ class DataStore:
         problem["medium_difficulty"] = _median(overall_values)
         problem["medium_quality"] = _median(quality_values)
 
-    def _save_store(self) -> None:
-        STORE_PATH.write_text(json.dumps(self.store, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _save_store(self, *keys: str) -> None:
+        existing_files = []
+        if STORE_DIR.exists():
+            existing_files = [path for path in STORE_DIR.glob("*.json") if path.is_file()]
+        initializing = not existing_files
+        STORE_DIR.mkdir(parents=True, exist_ok=True)
+
+        if keys:
+            target_keys: Set[str] = {key for key in keys if key in self.store or key in self._persisted_store}
+        else:
+            target_keys = {
+                key for key, value in self.store.items()
+                if key not in self._persisted_store or value != self._persisted_store[key]
+            }
+            target_keys.update({key for key in self._persisted_store.keys() if key not in self.store})
+        if initializing:
+            target_keys = set(self.store.keys()) | target_keys
+
+        if not target_keys:
+            return
+
+        for key in target_keys:
+            path = STORE_DIR / f"{key}.json"
+            if key in self.store:
+                payload = self.store[key]
+                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                self._persisted_store[key] = _clone_payload(payload)
+            else:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                self._persisted_store.pop(key, None)
+
+        legacy_path = LEGACY_STORE_PATH
+        if legacy_path.exists() and initializing:
+            backup_path = legacy_path.with_suffix(".json.bak")
+            try:
+                if backup_path.exists():
+                    backup_path.unlink()
+                legacy_path.rename(backup_path)
+            except OSError:
+                pass
+
         self._store_mtime = self._store_file_mtime()
 
     def _store_file_mtime(self) -> float:
+        latest = 0.0
+        if STORE_DIR.exists():
+            for path in STORE_DIR.glob("*.json"):
+                try:
+                    mtime = path.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                if mtime > latest:
+                    latest = mtime
+        if latest:
+            return latest
         try:
-            return STORE_PATH.stat().st_mtime
+            return LEGACY_STORE_PATH.stat().st_mtime
         except FileNotFoundError:
             return 0.0
 
