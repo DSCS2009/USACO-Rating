@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import time
 import hashlib
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -18,6 +20,8 @@ TYPES_PATH = DATA_DIR / "types.json"
 STORE_DIR = DATA_DIR / "store"
 LEGACY_STORE_PATH = DATA_DIR / "store.json"
 ANNOUNCEMENTS_SEED_PATH = DATA_DIR / "announcements.json"
+VOTES_DIR = STORE_DIR / "votes"
+LEGACY_VOTES_PATH = STORE_DIR / "votes.json"
 
 DEFAULT_TYPES_PAYLOAD: Dict[str, Any] = {"types": [], "groups": []}
 DEFAULT_PROBLEMS_PAYLOAD: Dict[str, Any] = {}
@@ -39,7 +43,6 @@ DEFAULT_STORE_PAYLOAD: Dict[str, Any] = {
     "next_type_id": 1,
     "next_category_id": 1,
     "users": [],
-    "votes": [],
 }
 DEFAULT_ANNOUNCEMENTS_SEED: Dict[str, Any] = {"announcements": []}
 
@@ -49,6 +52,41 @@ PROBLEM_STATS_SPECS = {
     "implementation": {"avg": "avg_implementation", "sd": "sd_implementation", "cnt": "cnt_implementation"},
     "quality": {"avg": "avg_quality", "sd": "sd_quality", "cnt": "cnt2"},
 }
+
+
+class StoreDict(dict):
+    """Custom dict wrapper to provide backward-compatible access to votes."""
+
+    def __init__(self, datastore: "DataStore") -> None:
+        super().__init__()
+        self._datastore = datastore
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "votes":
+            return self._datastore._get_votes_snapshot()
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "votes":
+            snapshot = self._datastore._get_votes_snapshot()
+            return snapshot if snapshot is not None else default
+        return super().get(key, default)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key == "votes":
+            snapshot = self._datastore._get_votes_snapshot()
+            if snapshot:
+                return snapshot
+            payload = default or []
+            self._datastore._replace_all_votes(payload)
+            return self._datastore._get_votes_snapshot()
+        return super().setdefault(key, default)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key == "votes":
+            self._datastore._replace_all_votes(value or [])
+            return
+        super().__setitem__(key, value)
 
 
 def _clone_payload(payload: Any) -> Any:
@@ -104,6 +142,15 @@ class DataStore:
         self.type_categories: Dict[int, List[int]] = {}
         self._store_mtime: float = 0.0
         self._persisted_store: Dict[str, Any] = {}
+        self.store: StoreDict = StoreDict(self)
+        self._votes_dir = VOTES_DIR
+        self._votes_cache: Dict[int, List[Dict[str, Any]]] = {}
+        self._votes_cache_mtime: Dict[int, float] = {}
+        self._votes_dirty: Set[int] = set()
+        self._vote_index: Dict[int, int] = {}
+        self._votes_lock = RLock()
+        self._votes_dir_mtime: float = 0.0
+        self._votes_snapshot: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         self._load_store()
         self._bootstrap_announcements()
 
@@ -162,8 +209,306 @@ class DataStore:
                 payload[key] = _clone_default(default)
         return payload
 
+    # ------------------------------------------------------------------
+    # Vote storage helpers
+
+    def _ensure_votes_dir(self) -> None:
+        with self._votes_lock:
+            self._votes_dir.mkdir(parents=True, exist_ok=True)
+
+    def _vote_file(self, problem_id: int) -> Path:
+        return self._votes_dir / f"{int(problem_id)}.json"
+
+    def _normalise_vote_entry(self, vote: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            vid = int(vote.get("id", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if vid <= 0:
+            return None
+        try:
+            problem_id = int(vote.get("problem_id", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if problem_id <= 0:
+            return None
+        try:
+            user_id = int(vote.get("user_id", 0) or 0)
+        except (TypeError, ValueError):
+            user_id = 0
+        vote["id"] = vid
+        vote["problem_id"] = problem_id
+        vote["user_id"] = user_id or vote.get("user_id")
+
+        thinking = vote.get("thinking")
+        implementation = vote.get("implementation")
+        overall = vote.get("overall")
+        legacy_difficulty = vote.get("difficulty")
+        if thinking is None and legacy_difficulty is not None:
+            thinking = legacy_difficulty
+        if implementation is None and legacy_difficulty is not None:
+            implementation = legacy_difficulty
+        if overall is None and thinking is not None and implementation is not None:
+            overall = _calc_overall(float(thinking), float(implementation))
+        elif overall is None:
+            overall = legacy_difficulty
+        vote["thinking"] = float(thinking) if thinking is not None else None
+        vote["implementation"] = float(implementation) if implementation is not None else None
+        vote["overall"] = float(overall) if overall is not None else None
+        if vote.get("overall") is not None:
+            vote["difficulty"] = vote["overall"]
+        vote.setdefault("quality", None)
+        vote.setdefault("comment", "")
+        vote.setdefault("public", False)
+        vote.setdefault("deleted", False)
+        vote.setdefault("accepted", True)
+        vote.setdefault("score", 0)
+        vote.setdefault("created_at", vote.get("created_at", _now_ts()))
+        vote.setdefault("updated_at", vote.get("updated_at", vote["created_at"]))
+        return vote
+
+    def _read_votes_from_disk(self, problem_id: int) -> List[Dict[str, Any]]:
+        path = self._vote_file(problem_id)
+        if not path.exists():
+            return []
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return []
+        if not text:
+            return []
+        try:
+            raw_votes = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        normalised: List[Dict[str, Any]] = []
+        for entry in raw_votes or []:
+            if not isinstance(entry, dict):
+                continue
+            vote = self._normalise_vote_entry(dict(entry))
+            if vote:
+                normalised.append(vote)
+        return normalised
+
+    def _get_vote_bucket(self, problem_id: int, *, clone: bool = False) -> List[Dict[str, Any]]:
+        with self._votes_lock:
+            path = self._vote_file(problem_id)
+            latest_mtime = 0.0
+            try:
+                latest_mtime = path.stat().st_mtime
+            except FileNotFoundError:
+                latest_mtime = 0.0
+            cached = self._votes_cache.get(problem_id)
+            cached_mtime = self._votes_cache_mtime.get(problem_id, -1.0)
+            if (
+                cached is None
+                or (problem_id not in self._votes_dirty and latest_mtime > cached_mtime)
+            ):
+                cached = self._read_votes_from_disk(problem_id)
+                self._votes_cache[problem_id] = cached
+                self._votes_cache_mtime[problem_id] = latest_mtime
+                self._votes_dirty.discard(problem_id)
+            if clone:
+                return [dict(vote) for vote in cached]
+            return cached
+
+    def _set_vote_bucket(self, problem_id: int, votes: List[Dict[str, Any]]) -> None:
+        with self._votes_lock:
+            self._votes_cache[problem_id] = votes
+            self._votes_dirty.add(problem_id)
+
+    def _save_vote_bucket(self, problem_id: int) -> None:
+        with self._votes_lock:
+            bucket = self._votes_cache.get(problem_id, [])
+            if problem_id not in self._votes_dirty and self._vote_file(problem_id).exists():
+                return
+            self._ensure_votes_dir()
+            path = self._vote_file(problem_id)
+            if bucket:
+                path.write_text(json.dumps(bucket, ensure_ascii=False, indent=2), encoding="utf-8")
+            else:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            try:
+                mtime = path.stat().st_mtime
+            except FileNotFoundError:
+                mtime = 0.0
+            self._votes_cache_mtime[problem_id] = mtime
+            self._votes_dirty.discard(problem_id)
+            self._votes_dir_mtime = self._compute_votes_dir_mtime()
+
+    def _iter_vote_files(self) -> Iterable[Path]:
+        if not self._votes_dir.exists():
+            return []
+        return sorted(self._votes_dir.glob("*.json"), key=lambda p: p.stem)
+
+    def _iter_all_votes(self) -> Iterable[Tuple[int, Dict[str, Any]]]:
+        for path in self._iter_vote_files():
+            try:
+                problem_id = int(path.stem)
+            except (TypeError, ValueError):
+                continue
+            votes = self._read_votes_from_disk(problem_id)
+            for vote in votes:
+                yield problem_id, vote
+
+    def _compute_votes_dir_mtime(self) -> float:
+        latest = 0.0
+        if self._votes_dir.exists():
+            for path in self._votes_dir.glob("*.json"):
+                try:
+                    mtime = path.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                if mtime > latest:
+                    latest = mtime
+        try:
+            dir_mtime = self._votes_dir.stat().st_mtime
+            latest = max(latest, dir_mtime)
+        except FileNotFoundError:
+            pass
+        return latest
+
+    def _reindex_votes(self) -> Dict[int, Optional[int]]:
+        vote_owner_map: Dict[int, Optional[int]] = {}
+        self._vote_index.clear()
+        for problem_id, vote in self._iter_all_votes():
+            vid = vote.get("id")
+            if not isinstance(vid, int):
+                continue
+            self._vote_index[vid] = problem_id
+            vote_owner_map[vid] = vote.get("user_id")
+        self._votes_dir_mtime = self._compute_votes_dir_mtime()
+        self._refresh_votes_snapshot()
+        return vote_owner_map
+
+    def _register_vote(self, vote: Dict[str, Any]) -> None:
+        vid = vote.get("id")
+        pid = vote.get("problem_id")
+        if isinstance(vid, int) and isinstance(pid, int):
+            self._vote_index[vid] = pid
+
+    def _deregister_vote(self, vote: Dict[str, Any]) -> None:
+        vid = vote.get("id")
+        if isinstance(vid, int):
+            self._vote_index.pop(vid, None)
+
+    def _import_votes_from_payload(self, votes_payload: Iterable[Dict[str, Any]]) -> None:
+        if not votes_payload:
+            return
+        self._replace_all_votes(votes_payload)
+        try:
+            LEGACY_VOTES_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _refresh_votes_snapshot(self) -> None:
+        ordered: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
+        for _, vote in self._iter_all_votes():
+            vid = vote.get("id")
+            if not isinstance(vid, int):
+                continue
+            ordered[vid] = dict(vote)
+        with self._votes_lock:
+            self._votes_snapshot = ordered
+
+    def _get_votes_snapshot(self) -> List[Dict[str, Any]]:
+        with self._votes_lock:
+            if not self._votes_snapshot:
+                return []
+            return [dict(entry) for entry in self._votes_snapshot.values()]
+
+    def _snapshot_upsert(self, vote: Dict[str, Any]) -> None:
+        vid = vote.get("id")
+        if not isinstance(vid, int):
+            return
+        self._votes_snapshot[vid] = dict(vote)
+
+    def _snapshot_remove_ids(self, vote_ids: Iterable[int]) -> None:
+        for vid in vote_ids:
+            if isinstance(vid, int):
+                self._votes_snapshot.pop(vid, None)
+
+    def _replace_all_votes(self, votes_payload: Iterable[Dict[str, Any]]) -> None:
+        grouped: Dict[int, List[Dict[str, Any]]] = {}
+        max_vote_id = 0
+        for entry in votes_payload:
+            if not isinstance(entry, dict):
+                continue
+            vote = self._normalise_vote_entry(dict(entry))
+            if not vote:
+                continue
+            vid = vote["id"]
+            if vid > max_vote_id:
+                max_vote_id = vid
+            grouped.setdefault(vote["problem_id"], []).append(vote)
+        existing_problem_ids: Set[int] = set(self._votes_cache.keys())
+        for path in self._iter_vote_files():
+            try:
+                existing_problem_ids.add(int(path.stem))
+            except (TypeError, ValueError):
+                continue
+        to_remove = existing_problem_ids - set(grouped.keys())
+        self._ensure_votes_dir()
+        with self._votes_lock:
+            ordered_snapshot: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
+            for problem_id in to_remove:
+                self._votes_cache.pop(problem_id, None)
+                self._votes_cache_mtime.pop(problem_id, None)
+                self._votes_dirty.discard(problem_id)
+                try:
+                    self._vote_file(problem_id).unlink()
+                except FileNotFoundError:
+                    pass
+            self._vote_index.clear()
+            for problem_id, votes in sorted(grouped.items(), key=lambda item: item[0]):
+                votes_sorted = sorted(votes, key=lambda item: item.get("id", 0))
+                self._votes_cache[problem_id] = votes_sorted
+                self._votes_cache_mtime[problem_id] = 0.0
+                self._votes_dirty.add(problem_id)
+                for vote in votes_sorted:
+                    vid = vote.get("id")
+                    if isinstance(vid, int):
+                        self._vote_index[vid] = problem_id
+                        ordered_snapshot[vid] = dict(vote)
+            self._votes_snapshot = ordered_snapshot
+        for problem_id in grouped.keys():
+            self._save_vote_bucket(problem_id)
+        self._votes_dir_mtime = self._compute_votes_dir_mtime()
+        self._rebuild_problem_stats()
+        if max_vote_id and self.store.get("next_vote_id", 1) <= max_vote_id:
+            self.store["next_vote_id"] = max_vote_id + 1
+            self._save_store("next_vote_id")
+        else:
+            self._save_store()
+
+    def _flush_dirty_votes(self) -> None:
+        with self._votes_lock:
+            dirty_ids = list(self._votes_dirty)
+        for problem_id in dirty_ids:
+            self._save_vote_bucket(problem_id)
+
+    def _evict_vote_cache(self, problem_id: Optional[int] = None) -> None:
+        with self._votes_lock:
+            if problem_id is None:
+                self._votes_cache.clear()
+                self._votes_cache_mtime.clear()
+                self._votes_dirty.clear()
+                self._votes_snapshot = OrderedDict()
+            else:
+                self._votes_cache.pop(problem_id, None)
+                self._votes_cache_mtime.pop(problem_id, None)
+                self._votes_dirty.discard(problem_id)
+
     def _load_store(self) -> None:
-        self.store = self._load_store_payload()
+        raw_store = self._load_store_payload()
+        legacy_votes_payload = raw_store.pop("votes", None)
+        self.store.clear()
+        self.store.update(raw_store)
+        self._evict_vote_cache()
+        self._vote_index.clear()
         self.course_categories.clear()
         self.type_categories.clear()
         self.store.setdefault("announcements", [])
@@ -180,6 +525,14 @@ class DataStore:
         self.store.setdefault("next_contest_id", 1)
         self.store.setdefault("next_category_id", 1)
         self.store.setdefault("next_report_id", 1)
+
+        if isinstance(legacy_votes_payload, dict):
+            candidate = legacy_votes_payload.get("votes")
+            if isinstance(candidate, list):
+                legacy_votes_payload = candidate
+        if isinstance(legacy_votes_payload, list):
+            self._import_votes_from_payload(legacy_votes_payload)
+
         self._load_custom_types_from_store()
 
         # Ensure custom problems are reloaded from disk without duplicating previous entries.
@@ -192,7 +545,6 @@ class DataStore:
             if bucket:
                 bucket["problems"] = [item for item in bucket.get("problems", []) if item.get("id") != pid]
 
-        votes = self.store.setdefault("votes", [])
         users = self.store.setdefault("users", [])
         for user in users:
             if "password" in user and not user.get("legacy_password_hash"):
@@ -218,41 +570,11 @@ class DataStore:
                     seen_perm.add(perm_str)
                     normalised_perms.append(perm_str)
             user["tag_permissions"] = normalised_perms
-        # Normalise votes to include new metrics
-        vote_owner_map: Dict[int, Optional[int]] = {}
-        for vote in votes:
-            thinking = vote.get("thinking")
-            implementation = vote.get("implementation")
-            overall = vote.get("overall")
-            legacy_difficulty = vote.get("difficulty")
-            if thinking is None and legacy_difficulty is not None:
-                thinking = legacy_difficulty
-            if implementation is None and legacy_difficulty is not None:
-                implementation = legacy_difficulty
-            if overall is None and thinking is not None and implementation is not None:
-                overall = _calc_overall(float(thinking), float(implementation))
-            elif overall is None:
-                overall = legacy_difficulty
-            vote["thinking"] = float(thinking) if thinking is not None else None
-            vote["implementation"] = float(implementation) if implementation is not None else None
-            vote["overall"] = float(overall) if overall is not None else None
-            if vote.get("overall") is not None:
-                vote["difficulty"] = vote["overall"]
-            vote.setdefault("quality", None)
-            vote.setdefault("comment", "")
-            vote.setdefault("public", False)
-            vote.setdefault("deleted", False)
-            vote.setdefault("accepted", True)
-            vote.setdefault("score", 0)
-            vote.setdefault("created_at", vote.get("created_at", _now_ts()))
-            vote.setdefault("updated_at", vote.get("updated_at", vote["created_at"]))
-            try:
-                vid = int(vote.get("id", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-            if vid <= 0:
-                continue
-            vote_owner_map[vid] = vote.get("user_id")
+        vote_owner_map = self._reindex_votes()
+        if self._vote_index:
+            max_vote_id = max(self._vote_index.keys())
+            if self.store.get("next_vote_id", 1) <= max_vote_id:
+                self.store["next_vote_id"] = max_vote_id + 1
 
         reports = self.store.setdefault("reports", [])
         next_report_id = max(1, int(self.store.get("next_report_id", 1) or 1))
@@ -402,7 +724,7 @@ class DataStore:
             if problem:
                 problem.update(override)
         self._rebuild_problem_stats()
-        self._persisted_store = _clone_payload(self.store)
+        self._persisted_store = _clone_payload(dict(self.store))
         self._store_mtime = self._store_file_mtime()
 
     def _load_custom_types_from_store(self) -> None:
@@ -520,28 +842,34 @@ class DataStore:
 
     def _rebuild_problem_stats(self) -> None:
         self._reset_problem_stats()
-        for vote in self.store.get("votes", []):
-            if vote.get("deleted"):
+        problem_ids: Set[int] = set(self._votes_cache.keys())
+        for path in self._iter_vote_files():
+            try:
+                problem_ids.add(int(path.stem))
+            except (TypeError, ValueError):
                 continue
-            problem_id = vote.get("problem_id")
-            if not problem_id:
+        for problem_id in sorted(problem_ids):
+            votes = self._get_vote_bucket(problem_id, clone=True)
+            if not votes:
                 continue
-            self._adjust_problem_stats(
-                problem_id,
-                thinking=vote.get("thinking"),
-                implementation=vote.get("implementation"),
-                overall=vote.get("overall"),
-                quality=vote.get("quality"),
-            )
+            for vote in votes:
+                if vote.get("deleted"):
+                    continue
+                self._adjust_problem_stats(
+                    problem_id,
+                    thinking=vote.get("thinking"),
+                    implementation=vote.get("implementation"),
+                    overall=vote.get("overall") or vote.get("difficulty"),
+                    quality=vote.get("quality"),
+                    update_median=False,
+                )
+            self._update_problem_medians(problem_id)
 
     def _update_problem_medians(self, problem_id: int) -> None:
         problem = self.problem_map.get(problem_id)
         if not problem:
             return
-        votes = [
-            vote for vote in self.store.get("votes", [])
-            if vote.get("problem_id") == problem_id and not vote.get("deleted")
-        ]
+        votes = [vote for vote in self._get_vote_bucket(problem_id, clone=True) if not vote.get("deleted")]
         if not votes:
             problem["median_thinking"] = None
             problem["median_implementation"] = None
@@ -565,15 +893,16 @@ class DataStore:
         STORE_DIR.mkdir(parents=True, exist_ok=True)
 
         if keys:
-            target_keys: Set[str] = {key for key in keys if key in self.store or key in self._persisted_store}
+            target_keys: Set[str] = {key for key in keys if key != "votes" and (key in self.store or key in self._persisted_store)}
         else:
             target_keys = {
                 key for key, value in self.store.items()
-                if key not in self._persisted_store or value != self._persisted_store[key]
+                if key != "votes" and (key not in self._persisted_store or value != self._persisted_store[key])
             }
-            target_keys.update({key for key in self._persisted_store.keys() if key not in self.store})
+            target_keys.update({key for key in self._persisted_store.keys() if key != "votes" and key not in self.store})
         if initializing:
             target_keys = set(self.store.keys()) | target_keys
+        target_keys.discard("votes")
 
         if not target_keys:
             return
@@ -613,6 +942,26 @@ class DataStore:
                     continue
                 if mtime > latest:
                     latest = mtime
+            if VOTES_DIR.exists():
+                for path in VOTES_DIR.glob("*.json"):
+                    try:
+                        mtime = path.stat().st_mtime
+                    except FileNotFoundError:
+                        continue
+                    if mtime > latest:
+                        latest = mtime
+                try:
+                    dir_mtime = VOTES_DIR.stat().st_mtime
+                    if dir_mtime > latest:
+                        latest = dir_mtime
+                except FileNotFoundError:
+                    pass
+            try:
+                legacy_votes_mtime = LEGACY_VOTES_PATH.stat().st_mtime
+                if legacy_votes_mtime > latest:
+                    latest = legacy_votes_mtime
+            except FileNotFoundError:
+                pass
         if latest:
             return latest
         try:
@@ -1123,38 +1472,71 @@ class DataStore:
         save: bool = True,
     ) -> Dict[str, Any]:
         self._ensure_store_fresh()
-        existing = None
-        for vote in self.store.get("votes", []):
-            if vote["user_id"] == user_id and vote["problem_id"] == problem_id:
-                existing = vote
-                break
         timestamp = _now_ts()
         thinking_val = float(thinking)
         implementation_val = float(implementation)
         overall_val = _calc_overall(thinking_val, implementation_val)
         quality_val = None if quality is None else float(quality)
-        if existing:
-            self._adjust_problem_stats(
-                problem_id,
-                thinking=existing.get("thinking"),
-                implementation=existing.get("implementation"),
-                overall=existing.get("overall") or existing.get("difficulty"),
-                quality=existing.get("quality"),
-                remove=True,
-            )
-            existing.update({
-                "thinking": thinking_val,
-                "implementation": implementation_val,
-                "overall": overall_val,
-                "difficulty": overall_val,
-                "quality": quality_val,
-                "comment": comment,
-                "public": make_public,
-                "deleted": False,
-                "accepted": True,
-                "score": existing.get("score", 0),
-                "updated_at": timestamp,
-            })
+        store_keys: Set[str] = set()
+        with self._votes_lock:
+            bucket = self._get_vote_bucket(problem_id)
+            existing = None
+            for vote in bucket:
+                if vote.get("user_id") == user_id:
+                    existing = vote
+                    break
+            if existing:
+                self._adjust_problem_stats(
+                    problem_id,
+                    thinking=existing.get("thinking"),
+                    implementation=existing.get("implementation"),
+                    overall=existing.get("overall") or existing.get("difficulty"),
+                    quality=existing.get("quality"),
+                    remove=True,
+                )
+                existing.update({
+                    "thinking": thinking_val,
+                    "implementation": implementation_val,
+                    "overall": overall_val,
+                    "difficulty": overall_val,
+                    "quality": quality_val,
+                    "comment": comment,
+                    "public": make_public,
+                    "deleted": False,
+                    "accepted": True,
+                    "score": existing.get("score", 0),
+                    "updated_at": timestamp,
+                })
+                self._register_vote(existing)
+                self._snapshot_upsert(existing)
+                self._votes_dirty.add(problem_id)
+                target_vote = existing
+            else:
+                vote_id = self.store["next_vote_id"]
+                vote = {
+                    "id": vote_id,
+                    "user_id": user_id,
+                    "problem_id": problem_id,
+                    "thinking": thinking_val,
+                    "implementation": implementation_val,
+                    "overall": overall_val,
+                    "difficulty": overall_val,
+                    "quality": quality_val,
+                    "comment": comment,
+                    "public": make_public,
+                    "deleted": False,
+                    "accepted": True,
+                    "score": 0,
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                }
+                self.store["next_vote_id"] = vote_id + 1
+                store_keys.add("next_vote_id")
+                bucket.append(vote)
+                self._register_vote(vote)
+                self._snapshot_upsert(vote)
+                target_vote = vote
+                self._votes_dirty.add(problem_id)
             self._adjust_problem_stats(
                 problem_id,
                 thinking=thinking_val,
@@ -1162,38 +1544,13 @@ class DataStore:
                 overall=overall_val,
                 quality=quality_val,
             )
-            if save:
-                self._save_store()
-            return existing
-        vote = {
-            "id": self.store["next_vote_id"],
-            "user_id": user_id,
-            "problem_id": problem_id,
-            "thinking": thinking_val,
-            "implementation": implementation_val,
-            "overall": overall_val,
-            "difficulty": overall_val,
-            "quality": quality_val,
-            "comment": comment,
-            "public": make_public,
-            "deleted": False,
-            "accepted": True,
-            "score": 0,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-        }
-        self.store["next_vote_id"] += 1
-        self.store.setdefault("votes", []).append(vote)
-        self._adjust_problem_stats(
-            problem_id,
-            thinking=thinking_val,
-            implementation=implementation_val,
-            overall=overall_val,
-            quality=quality_val,
-        )
         if save:
-            self._save_store()
-        return vote
+            self._save_vote_bucket(problem_id)
+            if store_keys:
+                self._save_store(*store_keys)
+            else:
+                self._save_store()
+        return target_vote
 
     def _adjust_problem_stats(
         self,
@@ -1204,6 +1561,7 @@ class DataStore:
         overall: Optional[float],
         quality: Optional[float],
         remove: bool = False,
+        update_median: bool = True,
     ) -> None:
         problem = self.problem_map.get(problem_id)
         if not problem:
@@ -1247,50 +1605,66 @@ class DataStore:
         update_metric("implementation", implementation)
         update_metric("overall", overall)
         update_metric("quality", quality)
-        self._update_problem_medians(problem_id)
+        if update_median:
+            self._update_problem_medians(problem_id)
 
     def _remove_votes_matching(self, predicate: Callable[[Dict[str, Any]], bool]) -> Tuple[int, List[int]]:
-        votes = self.store.get("votes", [])
-        if not votes:
-            return 0, []
-        remaining_votes: List[Dict[str, Any]] = []
         removed_vote_ids: List[int] = []
         cleared = 0
-        for vote in votes:
-            if not predicate(vote):
-                remaining_votes.append(vote)
-                continue
-            try:
-                vote_id = int(vote.get("id", 0) or 0)
-            except (TypeError, ValueError):
-                vote_id = 0
-            removed_vote_ids.append(vote_id)
-            if not vote.get("deleted"):
-                self._adjust_problem_stats(
-                    vote.get("problem_id"),
-                    thinking=vote.get("thinking"),
-                    implementation=vote.get("implementation"),
-                    overall=vote.get("overall") or vote.get("difficulty"),
-                    quality=vote.get("quality"),
-                    remove=True,
-                )
-                cleared += 1
-        if not removed_vote_ids:
+        problems_changed: Set[int] = set()
+        with self._votes_lock:
+            problem_ids: Set[int] = set(self._votes_cache.keys())
+            for path in self._iter_vote_files():
+                try:
+                    problem_ids.add(int(path.stem))
+                except (TypeError, ValueError):
+                    continue
+            for problem_id in sorted(problem_ids):
+                bucket = self._get_vote_bucket(problem_id)
+                if not bucket:
+                    continue
+                original_len = len(bucket)
+                for vote in list(bucket):
+                    if not predicate(vote):
+                        continue
+                    try:
+                        vote_id = int(vote.get("id", 0) or 0)
+                    except (TypeError, ValueError):
+                        vote_id = 0
+                    bucket.remove(vote)
+                    if vote_id:
+                        removed_vote_ids.append(vote_id)
+                        self._deregister_vote(vote)
+                    if not vote.get("deleted"):
+                        self._adjust_problem_stats(
+                            problem_id,
+                            thinking=vote.get("thinking"),
+                            implementation=vote.get("implementation"),
+                            overall=vote.get("overall") or vote.get("difficulty"),
+                            quality=vote.get("quality"),
+                            remove=True,
+                        )
+                        cleared += 1
+                    problems_changed.add(problem_id)
+                if len(bucket) != original_len:
+                    self._votes_dirty.add(problem_id)
+            if removed_vote_ids:
+                self._snapshot_remove_ids(removed_vote_ids)
+        if not removed_vote_ids and not problems_changed:
             return cleared, removed_vote_ids
-        self.store["votes"] = remaining_votes
+        for problem_id in problems_changed:
+            self._save_vote_bucket(problem_id)
         reports = self.store.get("reports", [])
-        if reports:
-            self.store["reports"] = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
+        if removed_vote_ids and reports:
+            remaining_reports = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
+            if len(remaining_reports) != len(reports):
+                self.store["reports"] = remaining_reports
         self._save_store()
         return cleared, removed_vote_ids
 
     def list_votes_for_problem(self, problem_id: int) -> List[Dict[str, Any]]:
         self._ensure_store_fresh()
-        votes = []
-        for vote in self.store.get("votes", []):
-            if vote["problem_id"] == problem_id:
-                votes.append(dict(vote))
-        return votes
+        return self._get_vote_bucket(problem_id, clone=True)
 
     def find_vote_by_id(self, vote_id: int) -> Optional[Dict[str, Any]]:
         self._ensure_store_fresh()
@@ -1300,7 +1674,13 @@ class DataStore:
             return None
         if target_id <= 0:
             return None
-        for vote in self.store.get("votes", []):
+        with self._votes_lock:
+            problem_id = self._vote_index.get(target_id)
+        if problem_id is not None:
+            for vote in self._get_vote_bucket(problem_id, clone=True):
+                if vote.get("id") == target_id:
+                    return vote
+        for _, vote in self._iter_all_votes():
             if vote.get("id") == target_id:
                 return dict(vote)
         return None
@@ -1330,11 +1710,7 @@ class DataStore:
             return False, "Invalid vote"
         if vote_id_int <= 0 or reporter_id <= 0:
             return False, "Invalid vote"
-        vote = None
-        for entry in self.store.get("votes", []):
-            if entry.get("id") == vote_id_int:
-                vote = entry
-                break
+        vote = self.find_vote_by_id(vote_id_int)
         if not vote or vote.get("deleted"):
             return False, "Vote not found"
         for report in self.store.get("reports", []):
@@ -1680,10 +2056,10 @@ class DataStore:
                 implementation_val = float(vote.get("implementing", vote.get("implementation", vote.get("difficulty", 0))))
                 quality_val = vote.get("quality")
                 comment = comment_lookup.get((problem_title, voter), "")
-                previous_vote = None
-                for existing_vote in self.store.get("votes", []):
-                    if existing_vote["user_id"] == voter_user["id"] and existing_vote["problem_id"] == existing_problem["id"]:
-                        previous_vote = existing_vote
+                existing_vote = None
+                for entry in self.list_votes_for_problem(existing_problem["id"]):
+                    if entry.get("user_id") == voter_user["id"]:
+                        existing_vote = entry
                         break
                 result = self.upsert_vote(
                     voter_user["id"],
@@ -1695,13 +2071,12 @@ class DataStore:
                     False,
                     save=False,
                 )
-                if previous_vote and previous_vote is result:
-                    summary["votes_updated"] += 1
-                elif previous_vote:
+                if existing_vote:
                     summary["votes_updated"] += 1
                 else:
                     summary["votes_imported"] += 1
 
+        self._flush_dirty_votes()
         self._rebuild_problem_stats()
         self._save_store()
         return summary
@@ -1723,23 +2098,9 @@ class DataStore:
         overrides = self.store.get("problem_overrides", {})
         if overrides.pop(str(problem_id), None) is not None:
             changed = True
-        removed_vote_ids = []
-        votes = self.store.get("votes", [])
-        remaining_votes = []
-        for vote in votes:
-            if vote.get("problem_id") == problem_id:
-                removed_vote_ids.append(vote.get("id"))
-            else:
-                remaining_votes.append(vote)
-        if len(remaining_votes) != len(votes):
-            self.store["votes"] = remaining_votes
-            changed = True
+        _, removed_vote_ids = self._remove_votes_matching(lambda vote: vote.get("problem_id") == problem_id)
         if removed_vote_ids:
-            reports = self.store.get("reports", [])
-            remaining_reports = [item for item in reports if item.get("vote_id") not in removed_vote_ids]
-            if len(remaining_reports) != len(reports):
-                self.store["reports"] = remaining_reports
-                changed = True
+            changed = True
         type_id = problem.get("type")
         bucket = self.problems_by_type.get(type_id)
         if bucket:
